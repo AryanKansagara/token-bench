@@ -227,7 +227,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: .5rem 0; }
 .dial-track { fill: none; stroke: var(--surface-2); stroke-width: 9; stroke-linecap: round; }
 .dial-fill { fill: none; stroke-width: 9; stroke-linecap: round; transition: stroke-dashoffset .12s linear; }
 .dial-tick { stroke: var(--border-strong); stroke-width: 1; }
-.dial figcaption { display: grid; justify-items: center; margin-top: -1.65rem; line-height: 1.2; }
+.dial figcaption { display: grid; justify-items: center; margin-top: -.9rem; line-height: 1.2; }
 .dial figcaption strong { font-size: 1.15rem; color: var(--heading); font-weight: 600; }
 .dial figcaption span { font: 600 .62rem var(--mono); text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .dial figcaption em { font-style: normal; font-size: .7rem; color: var(--muted); }
@@ -312,7 +312,8 @@ hr { border: 0; border-top: 1px solid var(--border); margin: .5rem 0; }
 .lane-top span { color: #9b9792; font-size: .68rem; }
 .lane-dials { display: grid; grid-template-columns: 1fr 1fr; gap: .2rem; }
 .lane-dials .dial { width: 100% !important; }
-.lane-dials .dial figcaption strong { font-size: .95rem; }
+.lane-dials .dial figcaption strong { font-size: .9rem; }
+.lane-dials .dial figcaption { margin-top: -.5rem; }
 .lane-text { height: 150px; overflow: hidden; margin: 0; font: .62rem/1.45 var(--mono); color: #c9c5c0; white-space: pre-wrap; word-break: break-word; background: #111; border-radius: var(--r); padding: .5rem; }
 .caret { display: inline-block; width: .5em; height: 1em; background: var(--lane); vertical-align: text-bottom; animation: blink 1s steps(1) infinite; }
 .lane-bar { height: 3px; background: #2a2a2a; border-radius: 3px; overflow: hidden; }
@@ -400,3 +401,22 @@ hr { border: 0; border-top: 1px solid var(--border); margin: .5rem 0; }
   .report { padding: 0; max-width: none; }
   .table { font-size: 10pt; }
 }
+pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+.row.top { align-items: flex-start; }
+.ep-grid .check { grid-column: span 2; align-self: center; }
+.loop-row { grid-template-columns: 200px 1fr 260px; }
+.loop-val { white-space: nowrap; }
+@media (max-width: 1020px) { .loop-row { grid-template-columns: 1fr; } .ep-grid .check { grid-column: auto; } }
+.leader td:nth-child(2) { white-space: nowrap; }
+.field.inline { min-width: 0; max-width: 100%; }
+.field.inline select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+.toolbar > * { min-width: 0; max-width: 100%; }
+@media (max-width: 1020px) { .hero-inner, .split { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 760px) {
+  .race-lanes { grid-template-columns: minmax(0, 1fr); }
+  .btn { white-space: normal; text-align: center; }
+  .display { font-size: 2.35rem; }
+  .page-head > div:first-child { min-width: 0; }
+}
+.title-input { max-width: 100%; text-overflow: ellipsis; }
+@media (max-width: 760px) { h1 .title-input { font-size: 1.7rem; } }

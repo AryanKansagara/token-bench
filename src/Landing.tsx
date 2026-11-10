@@ -10,7 +10,9 @@ const RACE_PROMPT = 'builtin:code-1'
 function Race() {
   const run = useMemo(() => sampleRun('rerun', 0), [])
   const lanes = useMemo(() => run.endpoints.map(e => {
-    const r = run.results.find(x => x.endpointId === e.id && x.promptId === RACE_PROMPT && x.ok)!
+    // The median-duration repetition, so the replay is typical rather than a lucky or stalled request.
+    const reps = run.results.filter(x => x.endpointId === e.id && x.promptId === RACE_PROMPT && x.ok).sort((a, b) => a.totalMs! - b.totalMs!)
+    const r = reps[Math.floor((reps.length - 1) / 2)]
     return { e, r, text: sampleText(r.outputTokens!, true), color: colorOf(run, e.id) }
   }), [run])
   const end = Math.max(...lanes.map(l => l.r.totalMs!))
@@ -110,7 +112,7 @@ export function Landing() {
             <p className="eyebrow mono">Agent loops</p>
             <h2 className="display-sm">Latency multiplies</h2>
             <p>An agent that makes eight sequential calls pays the time to first token eight times and streams eight answers while its context grows. Token Bench resamples your measured requests to estimate the typical and p90 time for a loop you describe, including prefill cost as context grows.</p>
-            <Link href="/app?sample=1&tab=agent" className="btn ghost">See the estimator</Link>
+            <Link href="/app?sample=1&tab=agent" className="btn primary">See the estimator</Link>
           </div>
           <LoopArt />
         </div>

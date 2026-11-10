@@ -116,18 +116,25 @@ export function sampleRun(variant: 'baseline' | 'rerun' = 'rerun', keepTextChars
   const r = rng(variant === 'baseline' ? 101 : 202)
   const reps = 3
   const results: RequestResult[] = []
+  // Three workers with a 250 ms ramp, like the runner, so the timeline shows real concurrency.
+  const free = [0, 250, 500]
   let clock = 0
+  const slot = (dur: number) => {
+    const i = free.indexOf(Math.min(...free))
+    const at = free[i]
+    free[i] = at + dur + 5 + r() * 15
+    clock = Math.max(clock, free[i])
+    return Math.round(at)
+  }
   for (let rep = 0; rep < reps; rep++) for (const p of SAMPLE_PROMPTS) for (const e of ENDPOINTS) {
     const pr = { ...e.profile }
     // The rerun tells a story for the compare view: B shipped a faster kernel, C got busier.
     if (variant === 'rerun' && e.id === 'sample-b') { pr.tps *= 1.35; pr.ttft *= 0.85 }
     if (variant === 'rerun' && e.id === 'sample-c') { pr.rateLimitP *= 1.8; pr.ttft *= 1.15 }
     const inputTokens = Math.round(((p.system ?? '') + p.user).length / 4)
-    const startedAt = Math.round(clock)
-    clock += 40 + r() * 60
-    const base = { endpointId: e.id, promptId: p.id, rep, startedAt, inputTokens }
-    if (r() < pr.rateLimitP) { results.push({ ...base, ok: false, status: 429, errorKind: 'rate_limit', error: 'HTTP 429: Rate limit exceeded (synthetic)', totalMs: Math.round(30 + r() * 80) }); continue }
-    if (r() < pr.timeoutP) { results.push({ ...base, ok: false, errorKind: 'timeout', error: 'Timed out after 60000 ms (synthetic)', totalMs: 60000 }); continue }
+    const base = { endpointId: e.id, promptId: p.id, rep, inputTokens }
+    if (r() < pr.rateLimitP) { const totalMs = Math.round(30 + r() * 80); results.push({ ...base, startedAt: slot(totalMs), ok: false, status: 429, errorKind: 'rate_limit', error: 'HTTP 429: Rate limit exceeded (synthetic)', totalMs }); continue }
+    if (r() < pr.timeoutP) { results.push({ ...base, startedAt: slot(15000), ok: false, errorKind: "timeout", error: "Timed out after 15000 ms (synthetic)", totalMs: 15000 }); continue }
     const ttft = Math.max(40, (pr.ttft + pr.prefillPer1k * inputTokens / 1000) * Math.exp(0.22 * gauss(r)))
     const tps = Math.max(10, pr.tps + pr.tpsSd * gauss(r))
     const outputTokens = Math.round(p.maxTokens * (0.72 + r() * 0.28))
@@ -141,15 +148,15 @@ export function sampleRun(variant: 'baseline' | 'rerun' = 'rerun', keepTextChars
       chunks.push(Math.round(t * 10) / 10)
     }
     const totalMs = t + 2 + r() * 6
-    results.push({ ...base, ok: true, status: 200, ttftMs: Math.round(ttft * 10) / 10, totalMs: Math.round(totalMs * 10) / 10, outputTokens, tokenSource: e.profile.tokPerChunk === 1 ? 'approx' : 'usage', chunks, ...(keepTextChars ? { text: sampleText(outputTokens, p.suite === 'Code').slice(0, keepTextChars) } : {}) })
+    results.push({ ...base, startedAt: slot(totalMs), ok: true, status: 200, ttftMs: Math.round(ttft * 10) / 10, totalMs: Math.round(totalMs * 10) / 10, outputTokens, tokenSource: e.profile.tokPerChunk === 1 ? 'approx' : 'usage', chunks, ...(keepTextChars ? { text: sampleText(outputTokens, p.suite === 'Code').slice(0, keepTextChars) } : {}) })
   }
   const createdAt = variant === 'baseline' ? Date.UTC(2026, 9, 12, 15, 0) : Date.UTC(2026, 10, 9, 15, 0)
   return {
     id: `sample-run-${variant}`,
     label: variant === 'baseline' ? 'Baseline, 12 Oct 2026 (synthetic)' : 'Rerun, 9 Nov 2026 (synthetic)',
     createdAt, source: 'sample',
-    config: { reps, concurrency: 3, rampMs: 250, timeoutMs: 60000, temperature: 0 },
+    config: { reps, concurrency: 3, rampMs: 250, timeoutMs: 15000, temperature: 0 },
     endpoints: SAMPLE_ENDPOINTS, prompts: SAMPLE_PROMPTS, results,
-    durationMs: Math.round(clock + 4000),
+    durationMs: Math.round(clock),
   }
 }

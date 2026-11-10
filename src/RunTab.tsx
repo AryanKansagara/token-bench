@@ -81,7 +81,7 @@ export default function RunTab({ project, update }: { project: Project; update(p
       <div className="grid-2">
         <div className="card pad stack">
           <h2 className="h4">Settings</h2>
-          <div className="row gap wrap">
+          <div className="row gap wrap top">
             {num('reps', 'Repetitions', 1, 50, 1, '3+ for intervals')}
             {num('concurrency', 'Parallel requests', 1, 64, 1, 'total, across endpoints')}
             {num('rampMs', 'Ramp (ms per worker)', 0, 30000, 50)}

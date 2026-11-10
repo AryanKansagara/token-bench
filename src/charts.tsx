@@ -1,8 +1,22 @@
 // Hand-rolled SVG charts.
-import { useId } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { histogram, quantile } from './engine/stats.ts'
 import type { RequestResult } from './engine/types.ts'
 import { fmtMs, fmtTps } from './ui.tsx'
+
+/** Tracks an element's width so SVG viewBoxes match real pixels and text never scales. */
+function useWidth(initial = 640) {
+  const ref = useRef<HTMLElement>(null)
+  const [w, setW] = useState(initial)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const ro = new ResizeObserver(([e]) => { const n = Math.round(e.contentRect.width); if (n > 0) setW(n) })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return [ref, Math.max(300, w)] as const
+}
 
 /** Semicircle gauge. Value is clamped to [0, max]; `log` spreads values that span orders of magnitude. */
 export function Dial({ value, max, label, unit, color = 'var(--accent)', log, size = 150, sub }: { value: number | null; max: number; label: string; unit: string; color?: string; log?: boolean; size?: number; sub?: string }) {
@@ -36,15 +50,16 @@ export interface DotRow { id: string; label: string; color: string; values: numb
 
 /** One row per endpoint: every request as a dot, median as a bar, bootstrap CI as a band. */
 export function DotPlot({ rows, format, log, title, higherBetter }: { rows: DotRow[]; format: (n: number) => string; log?: boolean; title: string; higherBetter?: boolean }) {
+  const [ref, W] = useWidth()
   const all = rows.flatMap(r => r.values)
   if (!all.length) return <p className="muted small">No successful requests.</p>
   const lo = log ? Math.max(1, Math.min(...all) * 0.8) : 0
   const hi = Math.max(...all) * 1.08
-  const W = 640, L = 150, R = 20, rowH = 34, H = rows.length * rowH + 28
+  const L = Math.min(175, W * 0.34), R = 44, rowH = 34, H = rows.length * rowH + 28
   const x = (v: number) => L + (log ? (Math.log(Math.max(v, lo)) - Math.log(lo)) / (Math.log(hi) - Math.log(lo)) : v / hi) * (W - L - R)
-  const ticks = log ? niceLogTicks(lo, hi) : niceTicks(hi)
+  const ticks = log ? niceLogTicks(lo, hi).filter(t => W >= 520 || /^1/.test(String(t))) : niceTicks(hi, W < 520 ? 3 : 5)
   return (
-    <figure className="chart">
+    <figure className="chart" ref={ref}>
       <figcaption className="chart-title">{title} <span className="muted">{higherBetter ? 'higher is better' : 'lower is better'}{log ? ', log scale' : ''}</span></figcaption>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${title}: ${rows.map(r => `${r.label} median ${r.p50 === null ? 'n/a' : format(r.p50)}`).join('; ')}`}>
         {ticks.map(t => <g key={t}><line x1={x(t)} x2={x(t)} y1={4} y2={H - 22} className="grid" /><text x={x(t)} y={H - 6} className="axis" textAnchor="middle">{format(t)}</text></g>)}
@@ -52,7 +67,7 @@ export function DotPlot({ rows, format, log, title, higherBetter }: { rows: DotR
           const y = 18 + i * rowH
           return (
             <g key={r.id}>
-              <text x={L - 10} y={y + 4} className="row-label" textAnchor="end">{r.label.length > 22 ? r.label.slice(0, 21) + '…' : r.label}</text>
+              <text x={L - 10} y={y + 4} className="row-label" textAnchor="end">{r.label.length > L / 6.4 ? r.label.slice(0, Math.floor(L / 6.4) - 1) + '…' : r.label}</text>
               {r.ci && <rect x={x(r.ci[0])} y={y - 9} width={Math.max(2, x(r.ci[1]) - x(r.ci[0]))} height={18} rx={3} fill={r.color} opacity={0.18} />}
               {r.values.map((v, j) => <circle key={j} cx={x(v)} cy={y + ((j * 7) % 11) - 5} r={2.6} fill={r.color} opacity={0.55} />)}
               {r.p50 !== null && <><line x1={x(r.p50)} x2={x(r.p50)} y1={y - 12} y2={y + 12} stroke={r.color} strokeWidth={3} /><text x={Math.min(W - R, x(r.p50) + 6)} y={y - 12} className="val" fill="currentColor">{format(r.p50)}</text></>}
@@ -81,18 +96,19 @@ function niceLogTicks(lo: number, hi: number): number[] {
 
 /** Cumulative output tokens over time for one request per endpoint: the race, as a chart. */
 export function RaceChart({ series, title }: { series: { id: string; label: string; color: string; r: RequestResult }[]; title: string }) {
+  const [ref, W] = useWidth()
   const s = series.filter(x => x.r.ok && x.r.chunks?.length)
   if (!s.length) return null
   const tMax = Math.max(...s.map(x => x.r.totalMs!)) * 1.04
   const nMax = Math.max(...s.map(x => x.r.outputTokens!)) * 1.08
-  const W = 640, H = 240, L = 46, B = 26, T = 10, R = 16
+  const H = 260, L = 46, B = 26, T = 10, R = 16
   const x = (t: number) => L + t / tMax * (W - L - R)
   const y = (n: number) => H - B - n / nMax * (H - B - T)
   return (
-    <figure className="chart">
+    <figure className="chart" ref={ref}>
       <figcaption className="chart-title">{title} <span className="muted">tokens received over time</span></figcaption>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={s.map(x => `${x.label}: ${x.r.outputTokens} tokens in ${fmtMs(x.r.totalMs)}`).join('; ')}>
-        {niceTicks(tMax).map(t => <g key={t}><line x1={x(t)} x2={x(t)} y1={T} y2={H - B} className="grid" /><text x={x(t)} y={H - 8} className="axis" textAnchor="middle">{fmtMs(t)}</text></g>)}
+        {niceTicks(tMax, Math.max(3, Math.floor(W / 120))).map(t => <g key={t}><line x1={x(t)} x2={x(t)} y1={T} y2={H - B} className="grid" /><text x={x(t)} y={H - 8} className="axis" textAnchor="middle">{fmtMs(t)}</text></g>)}
         {niceTicks(nMax, 4).map(n => <g key={n}><line x1={L} x2={W - R} y1={y(n)} y2={y(n)} className="grid" /><text x={L - 6} y={y(n) + 4} className="axis" textAnchor="end">{n}</text></g>)}
         {s.map(({ id, color, r }) => {
           const per = r.outputTokens! / r.chunks!.length
@@ -113,11 +129,11 @@ export const Legend = ({ items }: { items: { label: string; color: string }[] })
 export function ItlHistograms({ rows }: { rows: { id: string; label: string; color: string; values: number[] }[] }) {
   const all = rows.flatMap(r => r.values)
   if (!all.length) return <p className="muted small">No chunk timings recorded.</p>
-  const max = quantile(all, 0.98) || 1
   const bins = 24
   return (
     <div className="hist-grid">
       {rows.map(r => {
+        const max = r.values.length ? quantile(r.values, 0.98) || 1 : 1
         const h = histogram(r.values, bins, max)
         const top = Math.max(1, ...h.counts)
         return (
@@ -137,6 +153,7 @@ export function ItlHistograms({ rows }: { rows: { id: string; label: string; col
 
 /** Gantt view of the run: when each request started, waited for its first token, and finished. */
 export function Timeline({ results, colorOf, labelOf }: { results: RequestResult[]; colorOf: (id: string) => string; labelOf: (r: RequestResult) => string }) {
+  const [ref, W] = useWidth()
   const rs = results.filter(r => r.totalMs !== undefined).sort((a, b) => a.startedAt - b.startedAt)
   if (!rs.length) return null
   const end = Math.max(...rs.map(r => r.startedAt + r.totalMs!)) * 1.02
@@ -148,13 +165,13 @@ export function Timeline({ results, colorOf, labelOf }: { results: RequestResult
     lanes[l] = r.startedAt + r.totalMs!
     return { r, l }
   })
-  const W = 640, L = 8, R = 8, lh = 9, H = lanes.length * lh + 26
+  const L = 8, R = 8, lh = Math.max(9, Math.min(22, Math.floor(160 / Math.max(1, lanes.length)))), H = lanes.length * lh + 26
   const x = (t: number) => L + t / end * (W - L - R)
   return (
-    <figure className="chart">
+    <figure className="chart" ref={ref}>
       <figcaption className="chart-title">Run timeline <span className="muted">{lanes.length} lane{lanes.length === 1 ? '' : 's'} at peak; pale = waiting for first token, solid = streaming, red = failed</span></figcaption>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Timeline of ${rs.length} requests`}>
-        {niceTicks(end).map(t => <g key={t}><line x1={x(t)} x2={x(t)} y1={0} y2={H - 20} className="grid" /><text x={x(t)} y={H - 6} className="axis" textAnchor="middle">{fmtMs(t)}</text></g>)}
+        {niceTicks(end, Math.max(3, Math.floor(W / 120))).map(t => <g key={t}><line x1={x(t)} x2={x(t)} y1={0} y2={H - 20} className="grid" /><text x={x(t)} y={H - 6} className="axis" textAnchor="middle">{fmtMs(t)}</text></g>)}
         {placed.map(({ r, l }, i) => (
           <g key={i}>
             <title>{labelOf(r)}: {r.ok ? `TTFT ${fmtMs(r.ttftMs)}, total ${fmtMs(r.totalMs)}` : r.error}</title>

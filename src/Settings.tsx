@@ -18,7 +18,7 @@ export default function Settings() {
       <h1>Settings</h1>
       <div className="card pad stack">
         <h2 className="h4">Defaults for new benchmarks</h2>
-        <div className="row gap wrap">
+        <div className="row gap wrap top">
           {num('reps', 'Repetitions', 1, 50)}
           {num('concurrency', 'Parallel requests', 1, 64)}
           {num('rampMs', 'Ramp (ms per worker)', 0, 30000)}

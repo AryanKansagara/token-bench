@@ -111,7 +111,7 @@ function Results({ project, run, by, setBy, onPick }: { project: Project; run: R
   const nameOf = (id: string) => run.endpoints.find(e => e.id === id)?.name ?? id
   const promptName = (id: string) => run.prompts.find(p => p.id === id)?.name ?? id
   const [racePrompt, setRacePrompt] = useState(() => [...run.prompts].sort((a, b) => b.maxTokens - a.maxTokens)[0]?.id ?? '')
-  const race = run.endpoints.map(e => ({ id: e.id, label: e.name, color: colorOf(run, e.id), r: run.results.find(r => r.endpointId === e.id && r.promptId === racePrompt && r.ok)! })).filter(x => x.r)
+  const race = run.endpoints.map(e => ({ id: e.id, label: e.name, color: colorOf(run, e.id), r: medianRep(run, e.id, racePrompt)! })).filter(x => x.r)
   const errors = run.results.filter(r => !r.ok && r.errorKind !== 'aborted')
   const networkFails = errors.filter(r => r.errorKind === 'network').length
   const best = sums[0]
@@ -210,6 +210,12 @@ function Results({ project, run, by, setBy, onPick }: { project: Project; run: R
       )}
     </div>
   )
+}
+
+/** The repetition with the median duration: typical, not the luckiest or a stalled one. */
+function medianRep(run: Run, endpointId: string, promptId: string) {
+  const reps = run.results.filter(r => r.endpointId === endpointId && r.promptId === promptId && r.ok).sort((a, b) => a.totalMs! - b.totalMs!)
+  return reps[Math.floor((reps.length - 1) / 2)]
 }
 
 function KpiBest({ sums, label, pick, fmt }: { sums: Summary[]; label: string; pick(s: Summary): number | undefined; fmt(v: number): string }) {
@@ -364,7 +370,7 @@ function Agent({ project, update }: { project: Project; update(p: Partial<Projec
       <div className="card pad stack">
         <div className="row between wrap gap-sm"><h2 className="h4">Time to finish this agent loop</h2>{project.runs.length > 1 && <RunPicker project={project} run={run} onPick={setRunId} />}</div>
         <p className="muted small">An agent makes k model calls in sequence: each waits for the first token, streams its output, runs a tool, and the context grows. Latency multiplies by k. Estimated by resampling this run's measured (TTFT, tokens/s) pairs 2,000 times.</p>
-        <div className="row gap wrap">
+        <div className="row gap wrap top">
           {num('steps', 'Sequential calls (k)', 1, 200)}
           {num('firstInput', 'First prompt tokens', 1, 200000, 100)}
           {num('output', 'Output tokens per call', 1, 32000, 50)}
