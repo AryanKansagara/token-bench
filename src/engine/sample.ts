@@ -24,11 +24,88 @@ export const SAMPLE_PROMPTS: Prompt[] = [
 
 const ANSWER = `Latency is how long one request waits before it is done; throughput is how many requests or tokens the system finishes per second. For a chat product, users feel latency first: the time to the first token decides whether the reply feels instant, and decode speed decides whether a long answer streams faster than they can read. Throughput matters to the operator: a provider can serve many users at once yet still feel slow to each of them. When you compare providers, measure both on your own prompts, at the concurrency you expect, and look at the spread, not just the average, because the slowest few percent of requests are what users remember. An agent that makes ten sequential calls multiplies every millisecond of latency by ten, so fast inference turns a minute-long loop into seconds.`
 
-/** Splits text into roughly n tokens (about 4 characters each), repeating the corpus if needed. */
-export function sampleText(tokens: number): string {
+const CODE = `// Incremental SSE parser: feed it chunks as they arrive.
+export function createParser(onEvent: (data: string) => void) {
+  let buf = ''
+  let data: string[] = []
+  return (chunk: string) => {
+    buf += chunk
+    const lines = buf.split(/\\r?\\n/)
+    buf = lines.pop() ?? ''
+    for (const line of lines) {
+      if (line === '') {
+        if (data.length) onEvent(data.join('\\n'))
+        data = []
+      } else if (line.startsWith('data:')) {
+        data.push(line.slice(5).trimStart())
+      }
+    }
+  }
+}
+
+test('parses events split across chunks', () => {
+  const seen: string[] = []
+  const push = createParser(d => seen.push(d))
+  push('data: {"a"')
+  push(':1}\\n\\n')
+  assert.deepEqual(seen, ['{"a":1}'])
+})
+
+// Why it matters: the first token arrives in the first chunk,
+// so a parser that waits for the whole body hides your real TTFT.
+`
+
+/** Roughly n tokens (about 4 characters each) of prose or code, repeating the corpus if needed. */
+export function sampleText(tokens: number, code = false): string {
+  const src = code ? CODE : ANSWER
   let s = ''
-  while (s.length < tokens * 4) s += (s ? ' ' : '') + ANSWER
+  while (s.length < tokens * 4) s += (s ? (code ? '\n' : ' ') : '') + src
   return s.slice(0, tokens * 4)
+}
+
+/**
+ * A fetch that serves the synthetic providers by replaying recorded timings in real time, so the live runner,
+ * parser and charts can be tried without any API key. Only answers for the provider-*.example base URLs.
+ */
+export function replayFetch(run: Run): typeof fetch {
+  const r = rng(Date.now() % 100000)
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    const ep = run.endpoints.find(e => url.startsWith(e.baseUrl))
+    if (!ep) throw new TypeError('Failed to fetch')
+    const body = JSON.parse(String(init?.body ?? '{}'))
+    const pool = run.results.filter(x => x.endpointId === ep.id && Math.abs((run.prompts.find(p => p.id === x.promptId)?.maxTokens ?? 0) - body.max_tokens) < 1)
+    const rec = (pool.length ? pool : run.results.filter(x => x.endpointId === ep.id))[Math.floor(r() * (pool.length || 1))]
+    const wait = (ms: number) => new Promise<void>((res, rej) => {
+      const t = setTimeout(res, ms)
+      init?.signal?.addEventListener('abort', () => { clearTimeout(t); rej(new DOMException('Aborted', 'AbortError')) })
+    })
+    if (!rec || !rec.ok) {
+      await wait(rec?.totalMs && rec.totalMs < 5000 ? rec.totalMs : 80)
+      return new Response(JSON.stringify({ error: { message: 'Rate limit exceeded (synthetic replay)' } }), { status: 429 })
+    }
+    const isCode = /code|function|sql|implement/i.test(JSON.stringify(body.messages))
+    const text = sampleText(rec.outputTokens!, isCode)
+    const times = rec.chunks ?? [rec.ttftMs!]
+    const per = Math.ceil(text.length / times.length)
+    const enc = new TextEncoder()
+    const t0 = performance.now()
+    let i = 0
+    const stream = new ReadableStream<Uint8Array>({
+      async pull(c) {
+        if (i < times.length) {
+          await wait(Math.max(0, times[i] - (performance.now() - t0)))
+          c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: text.slice(i * per, (i + 1) * per) } }] })}\n\n`))
+          i++
+          return
+        }
+        if (body.stream_options?.include_usage) c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: rec.inputTokens, completion_tokens: rec.outputTokens } })}\n\n`))
+        c.enqueue(enc.encode('data: [DONE]\n\n'))
+        c.close()
+      },
+    }, { highWaterMark: 0 })
+    return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  }) as typeof fetch
 }
 
 function gauss(r: () => number) {
@@ -64,7 +141,7 @@ export function sampleRun(variant: 'baseline' | 'rerun' = 'rerun', keepTextChars
       chunks.push(Math.round(t * 10) / 10)
     }
     const totalMs = t + 2 + r() * 6
-    results.push({ ...base, ok: true, status: 200, ttftMs: Math.round(ttft * 10) / 10, totalMs: Math.round(totalMs * 10) / 10, outputTokens, tokenSource: e.profile.tokPerChunk === 1 ? 'approx' : 'usage', chunks, ...(keepTextChars ? { text: sampleText(outputTokens).slice(0, keepTextChars) } : {}) })
+    results.push({ ...base, ok: true, status: 200, ttftMs: Math.round(ttft * 10) / 10, totalMs: Math.round(totalMs * 10) / 10, outputTokens, tokenSource: e.profile.tokPerChunk === 1 ? 'approx' : 'usage', chunks, ...(keepTextChars ? { text: sampleText(outputTokens, p.suite === 'Code').slice(0, keepTextChars) } : {}) })
   }
   const createdAt = variant === 'baseline' ? Date.UTC(2026, 9, 12, 15, 0) : Date.UTC(2026, 10, 9, 15, 0)
   return {

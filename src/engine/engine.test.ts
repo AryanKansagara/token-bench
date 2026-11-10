@@ -409,3 +409,17 @@ test('generated Node script refuses to run without the key environment variables
   assert.equal(err.code, 1)
   assert.match(err.stderr, /export TB_KEY_LOCAL_1=/)
 })
+
+test('synthetic replay transport streams recorded timings through the real request path', async () => {
+  const { replayFetch, SAMPLE_PROMPTS } = await import('./sample.ts')
+  const run = sampleRun()
+  const f = replayFetch(run)
+  const p = SAMPLE_PROMPTS[0]
+  const ok = await streamChat(run.endpoints[0], '', p, 0, 0, { fetch: f })
+  if (ok.ok) {
+    assert.equal(ok.tokenSource, 'usage')
+    assert.ok(ok.ttftMs! > 30 && ok.chunks!.length > 1)
+  } else assert.equal(ok.errorKind, 'rate_limit')
+  const net = await streamChat({ ...EP, baseUrl: 'https://unknown.example/v1' }, '', p, 0, 0, { fetch: f })
+  assert.equal(net.errorKind, 'network')
+})
