@@ -420,3 +420,4 @@ pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
 }
 .title-input { max-width: 100%; text-overflow: ellipsis; }
 @media (max-width: 760px) { h1 .title-input { font-size: 1.7rem; } }
+@media print { .report .table-wrap { overflow: visible; } .report .table { font-size: 8pt; } }
