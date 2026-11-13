@@ -60,14 +60,16 @@ export function parseChatData(data: string): ChatDelta {
   if (data.trim() === '[DONE]') return { ...out, done: true }
   let j: unknown
   try { j = JSON.parse(data) } catch { return { ...out, error: `Malformed stream chunk: ${data.slice(0, 120)}` } }
-  const o = j as { choices?: { delta?: { content?: string | null; reasoning?: string | null; reasoning_content?: string | null }; text?: string; finish_reason?: string | null }[]; usage?: ChatDelta['usage'] | null; error?: { message?: string } | string }
+  const o = j as { choices?: { delta?: { content?: string | null; reasoning?: string | null; reasoning_content?: string | null }; text?: string; finish_reason?: string | null }[]; usage?: ChatDelta['usage'] | null; x_groq?: { usage?: ChatDelta['usage'] }; error?: { message?: string } | string }
   if (o.error) return { ...out, error: typeof o.error === 'string' ? o.error : o.error.message ?? 'Provider returned an error mid-stream' }
   for (const c of o.choices ?? []) {
     out.content += c.delta?.content ?? c.text ?? ''
     out.reasoning += c.delta?.reasoning ?? c.delta?.reasoning_content ?? ''
     if (c.finish_reason) out.finishReason = c.finish_reason
   }
-  if (o.usage) out.usage = o.usage
+  // Groq also reports usage inside x_groq on the final chunk, even without stream_options.
+  const usage = o.usage ?? o.x_groq?.usage
+  if (usage) out.usage = usage
   return out
 }
 

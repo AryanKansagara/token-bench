@@ -3,7 +3,7 @@ import { FIELDS, importPrompts, type Mapping, type PromptImport } from './engine
 import { streamChat } from './engine/request.ts'
 import { replayFetch, sampleRun } from './engine/sample.ts'
 import { approxTokens } from './engine/sse.ts'
-import { PRESETS, SUITES } from './engine/suites.ts'
+import { parseModelList, PRESETS, PRESETS_CHECKED, SUITES, type ListedModel } from './engine/suites.ts'
 import type { Endpoint, Prompt, RequestResult } from './engine/types.ts'
 import { IssueList } from './Project.tsx'
 import { colorOf, SERIES } from './projectData.ts'
@@ -23,7 +23,7 @@ function Endpoints({ project, update }: { project: Project; update: Update }) {
   useEffect(() => { if (adding && location.search) history.replaceState({}, '', location.pathname) }, [])
   const add = (p?: (typeof PRESETS)[number]) => {
     const used = new Set(project.endpoints.map(e => e.color))
-    const e: Endpoint = { id: uuid(), name: p?.name ?? 'Custom endpoint', preset: p?.id, baseUrl: p?.baseUrl ?? 'https://', model: p?.model ?? '', streamOptions: true, color: SERIES.find(c => !used.has(c)) ?? SERIES[project.endpoints.length % SERIES.length] }
+    const e: Endpoint = { id: uuid(), name: p?.name ?? 'Custom endpoint', preset: p?.id, baseUrl: p?.baseUrl ?? 'https://', model: p?.model ?? '', ...(p?.inputPrice !== undefined ? { inputPrice: p.inputPrice } : {}), ...(p?.outputPrice !== undefined ? { outputPrice: p.outputPrice } : {}), streamOptions: true, color: SERIES.find(c => !used.has(c)) ?? SERIES[project.endpoints.length % SERIES.length] }
     void update({ endpoints: [...project.endpoints, e] })
     setAdding(false)
     setTimeout(() => document.getElementById(`ep-${e.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50)
@@ -56,7 +56,7 @@ function Endpoints({ project, update }: { project: Project; update: Update }) {
           ))}
           <button type="button" className="preset" onClick={() => add()}><strong>Custom</strong><span className="muted small">vLLM, SGLang, LiteLLM, your gateway, anything OpenAI-compatible</span></button>
         </div>
-        <p className="muted small">Model ids are defaults for Llama 3.3 70B; check each provider's model list for the exact id you use.</p>
+        <p className="muted small">Defaults use gpt-oss-120b everywhere, with list prices per 1M tokens as published on {PRESETS_CHECKED}. Edit the model and prices on the card; Cerebras and OpenRouter can load their live model list.</p>
       </Modal>
     </div>
   )
@@ -69,23 +69,44 @@ function EndpointCard({ e, project, patch, remove }: { e: Endpoint; project: Pro
   useEffect(() => { void getKey(e.id).then(setKeyState) }, [e.id])
   const preset = PRESETS.find(p => p.id === e.preset)
   const isSample = e.baseUrl.includes('.example/')
+  const [models, setModels] = useState<ListedModel[] | 'loading' | null>(null)
+  const loadModels = async () => {
+    if (!preset?.modelsUrl) return
+    setModels('loading')
+    try {
+      const res = await fetch(preset.modelsUrl)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const list = parseModelList(await res.json())
+      setModels(list)
+      toast(`${list.length} models loaded from ${preset.name}. Pick one in the Model field; its list price fills in.`)
+    } catch (err) {
+      setModels(null)
+      toast(`Could not load the ${preset.name} model list: ${err instanceof Error ? err.message : String(err)}`, { tone: 'error' })
+    }
+  }
+  const listed = Array.isArray(models) ? models : []
+  const setModel = (model: string) => {
+    const m = listed.find(x => x.id === model)
+    patch({ model, ...(m ? { inputPrice: m.inputPrice, outputPrice: m.outputPrice } : {}) })
+  }
   const runTest = async () => {
     setTest('running')
     const p: Prompt = { id: 'test', name: 'Connection test', suite: 'test', user: 'Reply with the single word: ready', maxTokens: 16 }
     setTest(await streamChat(e, key ?? '', p, 0, 0, { timeoutMs: 30000, ...(isSample ? { fetch: replayFetch(sampleRun()) } : {}) }))
   }
   const field = (k: 'name' | 'baseUrl' | 'model', label: string, ph: string) => (
-    <label className="field"><span>{label}</span><input defaultValue={e[k]} placeholder={ph} spellCheck={false} onBlur={ev => { const v = ev.target.value.trim(); if (v !== e[k]) patch({ [k]: v }) }} /></label>
+    <label className="field"><span>{label}</span><input defaultValue={e[k]} placeholder={ph} spellCheck={false} {...(k === 'model' && listed.length ? { list: `models-${e.id}` } : {})} onBlur={ev => { const v = ev.target.value.trim(); if (v !== e[k]) { if (k === 'model') setModel(v); else patch({ [k]: v }) } }} /></label>
   )
   const price = (k: 'inputPrice' | 'outputPrice', label: string) => (
-    <label className="field short"><span>{label}</span><input type="number" min={0} step={0.01} defaultValue={e[k] ?? ''} placeholder="$" onBlur={ev => { const v = ev.target.value === '' ? undefined : Math.max(0, +ev.target.value); if (v !== e[k]) patch({ [k]: v }) }} /></label>
+    <label className="field short"><span>{label}</span><input key={String(e[k])} type="number" min={0} step={0.01} defaultValue={e[k] ?? ''} placeholder="$" onBlur={ev => { const v = ev.target.value === '' ? undefined : Math.max(0, +ev.target.value); if (v !== e[k]) patch({ [k]: v }) }} /></label>
   )
   return (
     <article className="card pad ep-card" id={`ep-${e.id}`} style={{ borderLeftColor: colorOf(project, e.id) }}>
       <div className="ep-grid">
-        {field('name', 'Display name', 'Cerebras, Llama 3.3 70B')}
+        {field('name', 'Display name', 'Cerebras, gpt-oss-120b')}
         {field('baseUrl', 'Base URL', 'https://api.example.com/v1')}
-        {field('model', 'Model', 'llama-3.3-70b')}
+        {field('model', 'Model', 'gpt-oss-120b')}
+        {listed.length > 0 && <datalist id={`models-${e.id}`}>{listed.map(m => <option key={m.id} value={m.id}>{m.name}{m.inputPrice !== undefined ? ` ($${m.inputPrice} in / $${m.outputPrice} out per 1M)` : ''}</option>)}</datalist>}
         <label className="field"><span>API key <em className="muted">this device only</em></span>
           <div className="row gap-sm">
             <input type={show ? 'text' : 'password'} value={key ?? ''} autoComplete="off" spellCheck={false} placeholder={isSample ? 'not needed for the synthetic replay' : preset?.cors === 'local' ? 'usually not needed' : 'sk-...'} onChange={ev => { setKeyState(ev.target.value); void setKey(e.id, ev.target.value.trim()) }} />
@@ -97,9 +118,11 @@ function EndpointCard({ e, project, patch, remove }: { e: Endpoint; project: Pro
         <label className="check"><input type="checkbox" checked={e.streamOptions} onChange={ev => patch({ streamOptions: ev.target.checked })} /> Request usage chunk (<code>stream_options.include_usage</code>)</label>
         <label className="field color"><span>Colour</span><input type="color" value={e.color ?? '#f05a28'} onChange={ev => patch({ color: ev.target.value })} /></label>
       </div>
+      {(listed.length > 0 ? !listed.some(m => m.id === e.model) : e.preset === 'cerebras' && e.model === 'llama-3.3-70b') && e.model && <p className="note warn small"><code>{e.model}</code> is not in {preset?.name ?? 'the provider'}'s current model list, so requests will fail. Pick a listed model{listed.length ? '' : ' (load the model list below)'}.</p>}
       {preset?.note && <p className="muted small">{preset.note}{preset.keyUrl && <> Get a key at <a href={preset.keyUrl} target="_blank" rel="noreferrer">{preset.keyUrl.replace(/^https:\/\//, '')}</a>.</>}</p>}
       <div className="row gap-sm wrap">
         <button type="button" className="btn ghost sm" onClick={() => void runTest()} disabled={test === 'running' || !e.model}>{test === 'running' ? 'Testing' : 'Test connection'}</button>
+        {preset?.modelsUrl && <button type="button" className="btn ghost sm" onClick={() => void loadModels()} disabled={models === 'loading'}>{models === 'loading' ? 'Loading models' : listed.length ? `${listed.length} models loaded` : 'Load model list and prices'}</button>}
         <button type="button" className="btn danger-ghost sm" onClick={remove}>Remove</button>
         {test && test !== 'running' && (test.ok
           ? <span className="ok-t small" role="status">Streaming works: first token in {fmtMs(test.ttftMs)}, {test.outputTokens} tokens ({test.tokenSource === 'usage' ? 'usage reported' : 'no usage chunk, tokens approximated'}).</span>
@@ -111,10 +134,18 @@ function EndpointCard({ e, project, patch, remove }: { e: Endpoint; project: Pro
 }
 
 export function Diagnosis({ r, e, project }: { r: RequestResult; e: Endpoint; project: Project }) {
+  const preset = PRESETS.find(p => p.id === e.preset)
+  if (r.errorKind === 'network' && preset?.errorsVisible === false) return (
+    <div className="note warn stack-sm">
+      <strong>The browser could not read {preset.name}'s reply.</strong>
+      <p className="small">{preset.name} allows browser calls, but its error replies carry no CORS header, so a wrong or missing key, an unknown model id or a rejected parameter all look like a network error here. Check the key and the model id first (load the model list above for current ids).</p>
+      <p className="small">To see the real error message, <Link href={`/app/p/${project.id}/run#terminal`}>run the terminal script</Link>: Node is not subject to CORS and prints the provider's reply.</p>
+    </div>
+  )
   if (r.errorKind === 'network') return (
     <div className="note warn stack-sm">
       <strong>The browser blocked this request before the provider answered.</strong>
-      <p className="small">Most often CORS: the provider does not allow API calls from web pages on other origins, so the browser refuses to show the response. It can also be a wrong URL, a local server that is not running, or an ad blocker. {e.baseUrl.startsWith('http://localhost') || e.baseUrl.startsWith('http://127.') ? 'For Ollama, restart it with OLLAMA_ORIGINS set to this site (see Docs).' : 'Nothing is wrong with your key.'}</p>
+      <p className="small">Most often CORS: the server does not allow API calls from web pages on other origins, so the browser refuses to show the response. All hosted presets allowed browser calls when checked on {PRESETS_CHECKED}. It can also be a wrong URL, a local server that is not running, or an ad blocker. {e.baseUrl.startsWith('http://localhost') || e.baseUrl.startsWith('http://127.') ? 'For Ollama, restart it with OLLAMA_ORIGINS set to this site (see Docs).' : 'Some providers also omit CORS headers on error replies, which hides a bad key behind this same error.'}</p>
       <p className="small">Fix: <Link href={`/app/p/${project.id}/run#terminal`}>download the terminal script</Link>. It runs the identical benchmark with Node (no CORS outside browsers) and writes a JSON file you import under History.</p>
     </div>
   )

@@ -1,4 +1,4 @@
-import { PRESETS } from './engine/suites.ts'
+import { PRESETS, PRESETS_CHECKED } from './engine/suites.ts'
 import { Code, Link } from './ui.tsx'
 
 const CSV = `name,prompt,max_tokens,suite,json
@@ -32,7 +32,7 @@ const RESULT = `{
   "format": "token-bench-run", "version": 1,
   "label": "Terminal run 2026-11-10 14:02", "createdAt": 1793541720000, "source": "node",
   "config": { "reps": 3, "concurrency": 2, "rampMs": 250, "timeoutMs": 60000, "temperature": 0 },
-  "endpoints": [{ "id": "…", "name": "Cerebras", "baseUrl": "https://api.cerebras.ai/v1", "model": "llama-3.3-70b", "streamOptions": true }],
+  "endpoints": [{ "id": "…", "name": "Cerebras", "baseUrl": "https://api.cerebras.ai/v1", "model": "gpt-oss-120b", "streamOptions": true }],
   "prompts": [{ "id": "builtin:chat-1", "name": "Chat 1", "suite": "Short chat", "user": "…", "maxTokens": 150 }],
   "results": [{ "endpointId": "…", "promptId": "builtin:chat-1", "rep": 0, "startedAt": 0, "ok": true, "status": 200,
     "ttftMs": 182.4, "totalMs": 301.9, "outputTokens": 141, "inputTokens": 38, "tokenSource": "usage", "chunks": [182.4, 190.1, …] }]
@@ -59,19 +59,21 @@ export default function Docs() {
         </ol>
 
         <h2 id="providers">Providers and base URLs</h2>
-        <p>Any endpoint that implements <code>POST /chat/completions</code> with <code>stream: true</code> works. Defaults below use Llama 3.3 70B everywhere so the first comparison is like for like; model ids change, so check each provider's model list.</p>
+        <p>Any endpoint that implements <code>POST /chat/completions</code> with <code>stream: true</code> works. Defaults below use OpenAI's open-weight gpt-oss-120b everywhere, the one model all five hosted presets serve, so the first comparison is like for like. Cerebras retired Llama 3.3 70B, so older benchmarks that used it will get an error from Cerebras until you change the model id.</p>
+        <p>Checked on {PRESETS_CHECKED}: model ids against each provider's model docs (<a href="https://inference-docs.cerebras.ai/models/overview" target="_blank" rel="noreferrer">Cerebras</a>, <a href="https://console.groq.com/docs/models" target="_blank" rel="noreferrer">Groq</a>, <a href="https://docs.together.ai/docs/serverless-models" target="_blank" rel="noreferrer">Together</a>, <a href="https://fireworks.ai/models/fireworks/gpt-oss-120b" target="_blank" rel="noreferrer">Fireworks</a>, <a href="https://openrouter.ai/api/v1/models" target="_blank" rel="noreferrer">OpenRouter</a>); list prices from the same pages, and from Cerebras' public model list at <code>https://api.cerebras.ai/public/v1/models</code>; browser access by sending a CORS preflight and a keyless request to each <code>/chat/completions</code> with an <code>Origin</code> header. Prices are filled in when you add a preset and are always yours to edit. Cerebras and OpenRouter publish keyless, browser-readable model lists, so their endpoint cards can load current model ids and prices live.</p>
         <div className="table-wrap"><table className="table">
-          <thead><tr><th>Preset</th><th>Base URL</th><th>Default model</th><th>Browser calls</th></tr></thead>
-          <tbody>{PRESETS.map(p => <tr key={p.id}><td>{p.name}</td><td className="mono small">{p.baseUrl}</td><td className="mono small">{p.model}</td><td className="small">{p.cors === 'yes' ? 'Allowed' : p.cors === 'local' ? 'Needs local config' : 'Depends on provider policy; test it'}</td></tr>)}</tbody>
+          <thead><tr><th>Preset</th><th>Base URL</th><th>Default model</th><th>$ / 1M in, out</th><th>Browser calls</th></tr></thead>
+          <tbody>{PRESETS.map(p => <tr key={p.id}><td>{p.name}</td><td className="mono small">{p.baseUrl}</td><td className="mono small">{p.model}</td><td className="small num">{p.inputPrice !== undefined ? `$${p.inputPrice.toFixed(2)}, $${p.outputPrice?.toFixed(2)}` : 'free (local)'}</td><td className="small">{p.cors === 'local' ? 'Needs local config' : p.errorsVisible === false ? 'Allowed; error replies hidden' : 'Allowed, including error replies'}</td></tr>)}</tbody>
         </table></div>
         <p>Usage chunk: when <code>stream_options.include_usage</code> is on, the final chunk reports exact prompt and completion tokens. A few servers reject the option with HTTP 400; untick it on the endpoint and Token Bench falls back to its local token approximation (marked ≈).</p>
 
         <h2 id="cors">CORS and the terminal script</h2>
-        <p>Browsers only show a cross-origin response if the server allows it. When a provider does not, the request fails before it is sent, with an opaque network error that looks the same as a DNS failure. Token Bench reports these as <b>blocked by the browser</b>. Your key is not the problem.</p>
+        <p>Browsers only show a cross-origin response if the server allows it. When a provider does not, the request fails before it is sent, with an opaque network error that looks the same as a DNS failure. Token Bench reports these as <b>blocked by the browser</b>.</p>
+        <p>All five hosted presets answered the preflight with <code>Access-Control-Allow-Origin: *</code> for <code>authorization, content-type</code> when checked on {PRESETS_CHECKED}, so streaming benchmarks run straight from this page. One catch: Cerebras' 401 and other error replies on <code>/chat/completions</code> carry no CORS header, so in a browser a wrong key or unknown model id shows up as a network error rather than the provider's message. Groq, Together, Fireworks and OpenRouter include the header on errors, so their messages come through. Corporate proxies and ad blockers can still block any of them.</p>
         <p>The fix is the terminal script on the Run tab: a single <code>.mjs</code> file for Node 18 or newer, no dependencies, containing your endpoints, prompts and settings but no keys. It uses the same request body, the same SSE parsing and the same timing points as the browser.</p>
         <Code label="Shell" code={`export TB_KEY_CEREBRAS_1=...     # names are printed at the top of the script\nnode token-bench.mjs results.json\n# then: Benchmark → History → Import result file`} />
         <p>Running it from a server in the same region as your production app gives the most representative numbers.</p>
-        <p><b>Ollama</b> rejects browser origins by default. Allow this site:</p>
+        <p><b>Ollama</b> only allows <code>localhost</code> and <code>127.0.0.1</code> origins by default. Allow this site (recent Chrome versions also ask once to allow access to your local network):</p>
         <Code label="Shell" code={OLLAMA} />
         <p><b>llama.cpp</b> <code>llama-server</code> allows browser requests by default. Use base URL <code>http://localhost:8080/v1</code>.</p>
 

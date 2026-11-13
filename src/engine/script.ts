@@ -35,7 +35,7 @@ async function one(ep, p, rep, startedAt) {
       let c = '', r = ''
       for (const ch of j.choices || []) { c += (ch.delta && ch.delta.content) || ch.text || ''; r += (ch.delta && (ch.delta.reasoning || ch.delta.reasoning_content)) || '' }
       if (c || r) { chunks.push(Math.round((performance.now() - t0) * 10) / 10); text += c; reasoning += r }
-      if (j.usage) usage = j.usage
+      if (j.usage || (j.x_groq && j.x_groq.usage)) usage = j.usage || j.x_groq.usage
     }
     let data = []
     const line = l => { if (l === '') { if (data.length) onData(data.join('\n')); data = [] } else if (l.startsWith('data:')) data.push(l.slice(5).replace(/^ /, '')) }

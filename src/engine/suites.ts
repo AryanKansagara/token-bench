@@ -2,18 +2,55 @@
 import { rng } from './stats.ts'
 import type { Prompt } from './types.ts'
 
-export interface Preset { id: string; name: string; baseUrl: string; model: string; keyUrl: string; cors: 'yes' | 'varies' | 'local'; note: string }
+export interface Preset {
+  id: string; name: string; baseUrl: string; model: string; keyUrl: string
+  /** yes: preflight allows any origin. local: the server must be configured. */
+  cors: 'yes' | 'local'
+  /** False when error responses (bad key, unknown model) omit Access-Control-Allow-Origin, so the browser hides them. */
+  errorsVisible?: boolean
+  /** Keyless, CORS-open model list with per-token prices in the OpenRouter shape. */
+  modelsUrl?: string
+  /** List prices in USD per 1M tokens for the default model, as published on the date in PRESETS_CHECKED. */
+  inputPrice?: number; outputPrice?: number
+  note: string
+}
 
-/** Defaults pick the same open model (Llama 3.3 70B) everywhere so the first comparison is like for like. */
+/** When the ids, prices and CORS behaviour below were last checked against the providers. */
+export const PRESETS_CHECKED = '2026-11-13'
+
+/**
+ * Defaults pick the same open model (gpt-oss-120b) everywhere so the first comparison is like for like.
+ * Cerebras retired Llama 3.3 70B; gpt-oss-120b is the one model all five hosted presets serve.
+ */
 export const PRESETS: Preset[] = [
-  { id: 'cerebras', name: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1', model: 'llama-3.3-70b', keyUrl: 'https://cloud.cerebras.ai', cors: 'varies', note: 'Model ids differ per provider; check the provider model list.' },
-  { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', keyUrl: 'https://console.groq.com/keys', cors: 'varies', note: '' },
-  { id: 'together', name: 'Together AI', baseUrl: 'https://api.together.xyz/v1', model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', keyUrl: 'https://api.together.ai/settings/api-keys', cors: 'varies', note: '' },
-  { id: 'fireworks', name: 'Fireworks AI', baseUrl: 'https://api.fireworks.ai/inference/v1', model: 'accounts/fireworks/models/llama-v3p3-70b-instruct', keyUrl: 'https://fireworks.ai/account/api-keys', cors: 'varies', note: '' },
-  { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.3-70b-instruct', keyUrl: 'https://openrouter.ai/settings/keys', cors: 'yes', note: 'Routes to an upstream provider; pin one with provider routing if you want a stable comparison.' },
-  { id: 'ollama', name: 'Ollama (local)', baseUrl: 'http://localhost:11434/v1', model: 'llama3.2', keyUrl: '', cors: 'local', note: 'Start Ollama with OLLAMA_ORIGINS set to this site, or use the Node script.' },
-  { id: 'llamacpp', name: 'llama.cpp server (local)', baseUrl: 'http://localhost:8080/v1', model: 'local', keyUrl: '', cors: 'local', note: 'llama-server allows browser requests by default.' },
+  { id: 'cerebras', name: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1', model: 'gpt-oss-120b', keyUrl: 'https://cloud.cerebras.ai', cors: 'yes', errorsVisible: false, modelsUrl: 'https://api.cerebras.ai/public/v1/models', inputPrice: 0.35, outputPrice: 0.75, note: 'Browser calls are allowed, but error replies (such as a wrong key) carry no CORS header, so the browser reports them as a network error.' },
+  { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b', keyUrl: 'https://console.groq.com/keys', cors: 'yes', inputPrice: 0.15, outputPrice: 0.6, note: '' },
+  { id: 'together', name: 'Together AI', baseUrl: 'https://api.together.xyz/v1', model: 'openai/gpt-oss-120b', keyUrl: 'https://api.together.ai/settings/api-keys', cors: 'yes', inputPrice: 0.15, outputPrice: 0.6, note: '' },
+  { id: 'fireworks', name: 'Fireworks AI', baseUrl: 'https://api.fireworks.ai/inference/v1', model: 'accounts/fireworks/models/gpt-oss-120b', keyUrl: 'https://fireworks.ai/account/api-keys', cors: 'yes', inputPrice: 0.15, outputPrice: 0.6, note: '' },
+  { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-oss-120b', keyUrl: 'https://openrouter.ai/settings/keys', cors: 'yes', modelsUrl: 'https://openrouter.ai/api/v1/models', inputPrice: 0.15, outputPrice: 0.6, note: 'Routes to an upstream provider and the price varies by route; pin one with provider routing if you want a stable comparison.' },
+  { id: 'ollama', name: 'Ollama (local)', baseUrl: 'http://localhost:11434/v1', model: 'gpt-oss:20b', keyUrl: '', cors: 'local', note: 'Ollama only accepts browser requests from localhost by default: start it with OLLAMA_ORIGINS set to this site, or use the Node script. Chrome may also ask to allow local network access.' },
+  { id: 'llamacpp', name: 'llama.cpp server (local)', baseUrl: 'http://localhost:8080/v1', model: 'local', keyUrl: '', cors: 'local', note: 'llama-server allows browser requests by default. Chrome may ask to allow local network access.' },
 ]
+
+export interface ListedModel { id: string; name: string; inputPrice?: number; outputPrice?: number }
+
+/**
+ * Reads a /models response in the shape served by OpenRouter and Cerebras' public list:
+ * pricing.prompt and pricing.completion are USD per token as strings. Returns USD per 1M tokens.
+ */
+export function parseModelList(json: unknown): ListedModel[] {
+  const data = (json as { data?: unknown })?.data
+  if (!Array.isArray(data)) return []
+  const perM = (v: unknown) => {
+    const n = typeof v === 'string' || typeof v === 'number' ? Number(v) : NaN
+    return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e6 * 1e4) / 1e4 : undefined
+  }
+  return data.flatMap((m: { id?: unknown; name?: unknown; deprecated?: unknown; pricing?: { prompt?: unknown; completion?: unknown } }) => {
+    if (typeof m?.id !== 'string' || m.deprecated === true) return []
+    const inputPrice = perM(m.pricing?.prompt), outputPrice = perM(m.pricing?.completion)
+    return [{ id: m.id, name: typeof m.name === 'string' ? m.name : m.id, ...(inputPrice !== undefined ? { inputPrice } : {}), ...(outputPrice !== undefined ? { outputPrice } : {}) }]
+  })
+}
 
 const words = (n: number) => `Answer in about ${Math.round(n * 0.75)} words.`
 

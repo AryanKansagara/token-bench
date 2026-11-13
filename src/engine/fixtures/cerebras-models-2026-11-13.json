@@ -1,0 +1,45 @@
+{
+ "object": "list",
+ "data": [
+  {
+   "id": "gpt-oss-120b",
+   "object": "model",
+   "created": 1754438400,
+   "owned_by": "OpenAI",
+   "name": "OpenAI GPT OSS",
+   "hugging_face_id": "openai/gpt-oss-120b",
+   "pricing": {
+    "prompt": "0.00000035",
+    "completion": "0.00000075"
+   },
+   "limits": {
+    "max_context_length": 131072,
+    "max_completion_tokens": 40960,
+    "requests_per_minute": null,
+    "tokens_per_minute": null
+   },
+   "deprecated": false,
+   "preview": false
+  },
+  {
+   "id": "qwen-3.8-27b",
+   "object": "model",
+   "created": 0,
+   "owned_by": "Cerebras",
+   "name": "Qwen 3.8 27B",
+   "hugging_face_id": "Qwen/Qwen3.8-27B",
+   "pricing": {
+    "prompt": "0.00000099",
+    "completion": "0.00000149"
+   },
+   "limits": {
+    "max_context_length": 65536,
+    "max_completion_tokens": 32768,
+    "requests_per_minute": null,
+    "tokens_per_minute": null
+   },
+   "deprecated": false,
+   "preview": false
+  }
+ ]
+}
