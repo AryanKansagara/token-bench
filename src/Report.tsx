@@ -47,10 +47,10 @@ export default function Report({ id }: { id: string }) {
       </section>
       <section>
         <h2>Per prompt (median end to end)</h2>
-        <table className="table">
+        <div className="table-wrap"><table className="table">
           <thead><tr><th>Prompt</th>{run.endpoints.map(e => <th key={e.id} className="num"><i className="sw" style={{ background: colorOf(run, e.id) }} />{e.name}</th>)}</tr></thead>
           <tbody>{matrix.map(m => <tr key={m.prompt.id}><td>{m.prompt.name} <span className="muted small">{m.prompt.maxTokens} tok</span></td>{m.cells.map(c => <td key={c.endpointId} className={`num mono${m.winner === c.endpointId ? ' win' : ''}`}>{fmtMs(c.e2e)}</td>)}</tr>)}</tbody>
-        </table>
+        </table></div>
       </section>
       {loop && (
         <section>

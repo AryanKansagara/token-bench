@@ -10,7 +10,7 @@ Choosing a fast inference provider today means trusting someone else's leaderboa
 
 ## Features
 
-- Endpoints with presets for Cerebras, Groq, Together, Fireworks, OpenRouter, Ollama and llama.cpp, or any custom base URL. Keys stay in IndexedDB on your device and are never synced or exported.
+- Endpoints with presets for Cerebras, Groq, Together, Fireworks, OpenRouter, Ollama and llama.cpp, or any custom base URL. Hosted presets default to gpt-oss-120b with list prices, and Cerebras and OpenRouter cards can load their live public model list and prices. Model ids, prices and browser (CORS) behaviour were checked against each provider on 2026-11-13; see Docs. Keys stay in IndexedDB on your device and are never synced or exported.
 - Built-in prompt suites (short chat, long-context summarisation, code, JSON mode) plus CSV / TSV / JSONL / JSON import with column mapping and a line-numbered validation report.
 - Streaming engine: incremental SSE parser, TTFT, inter-token latency distribution and jitter, decode tokens/s from the usage chunk or a local token approximation, error and 429 classification.
 - Concurrency runner with N parallel workers and a ramp, requests interleaved across providers.
