@@ -63,7 +63,7 @@ export default function Report({ id }: { id: string }) {
       <section className="small muted">
         <h2>Method</h2>
         <p>Each request is a streamed OpenAI-compatible chat completion. TTFT is the time from sending the request to the first chunk with content. Decode speed is (output tokens − 1) divided by the time after the first token. Output tokens come from the provider's usage chunk where available, otherwise a local approximation (≈). Medians carry 95% percentile-bootstrap intervals (1,000 resamples). Consistency is the coefficient of variation of decode speed. Prices are user-entered. Requests were interleaved across endpoints so no provider got a quieter minute.</p>
-        <p>Generated with Token Bench, an independent tool not affiliated with any provider measured here.</p>
+        <p>Generated with Token Bench.</p>
       </section>
     </article>
   )

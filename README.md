@@ -32,4 +32,4 @@ npm run build
 
 Copy `.env.example` values (Supabase URL and publishable key) into `.env` to enable sync; without them the app runs local-only.
 
-Built by Aryan Kansagara. Independent project, not affiliated with Cerebras.
+Built by Aryan Kansagara.
