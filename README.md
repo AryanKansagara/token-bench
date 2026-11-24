@@ -32,4 +32,19 @@ npm run build
 
 Copy `.env.example` values (Supabase URL and publishable key) into `.env` to enable sync; without them the app runs local-only.
 
+## Tests
+
+```
+npm test                                   # engine unit tests
+npx playwright install chromium            # once; Linux CI also needs --with-deps
+npm run test:e2e                           # builds, serves the production build, runs the browser suite
+E2E_PORT=4500 npm run test:e2e             # pick another port (default 4399)
+```
+
+The end-to-end suite (`e2e/`, Playwright with Chromium) runs against the production build served by `vite preview`. It never contacts a real provider: streaming runs go to an in-process stub server on `127.0.0.1` (`e2e/stub.ts`) that can answer cleanly, rate limit, fail, stall or cut a stream off, provider hosts such as `api.groq.com` are answered by `page.route`, every other external request is blocked, API keys are made-up strings, and an uncaught page error fails the test. Tests marked `test.fail` document a known app bug and link its issue; when the bug is fixed they report "expected to fail but passed", and the marker should be removed.
+
+GitHub Actions (`.github/workflows/ci.yml`, job `test`) runs install, build, unit tests and the end-to-end suite on every pull request and on pushes to `main`.
+
+Vercel builds only `main` (`git.deploymentEnabled` in `vercel.json`), so pull requests are gated by the `test` check, not by preview deployments.
+
 Built by Aryan Kansagara.
