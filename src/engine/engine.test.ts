@@ -420,6 +420,38 @@ test('the Node script treats a stream that closes early as a failure', async () 
   } finally { server.close(); rmSync(dir, { recursive: true, force: true }) }
 })
 
+test('a connection lost after the reply started is a stream failure in the browser engine and the Node script', async () => {
+  const server = createServer((req, res) => {
+    req.resume()
+    if (req.url!.startsWith('/refuse')) return void res.socket!.destroy()
+    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    if (req.url!.startsWith('/mid')) res.write(chunk('one '))
+    else res.write(': keepalive\n\n')
+    setTimeout(() => res.socket?.destroy(), 60)
+  })
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', () => r()))
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  const dir = mkdtempSync(join(tmpdir(), 'tb-'))
+  const want: Record<string, Partial<RequestResult>> = {
+    mid: { status: 200, errorKind: 'stream', error: 'Connection lost mid-stream after 1 chunk' },
+    early: { status: 200, errorKind: 'stream', error: 'Connection lost after the provider answered, before any content' },
+    refuse: { errorKind: 'network' },
+  }
+  try {
+    const eps = Object.keys(want).map(id => ({ ...EP, id, baseUrl: `${origin}/${id}` }))
+    writeFileSync(join(dir, 'tb.mjs'), nodeScript(eps, [P], { reps: 1, concurrency: 1, rampMs: 0, timeoutMs: 5000, temperature: 0 }))
+    await new Promise<void>((res, rej) => execFile(process.execPath, [join(dir, 'tb.mjs'), join(dir, 'out.json')], e => e ? rej(e) : res()))
+    const fromScript: RequestResult[] = JSON.parse(readFileSync(join(dir, 'out.json'), 'utf8')).results
+    for (const [i, e] of eps.entries()) for (const r of [await streamChat(e, '', P, 0, 0, { timeoutMs: 5000 }), fromScript[i]]) {
+      assert.equal(r.ok, false); assert.equal(r.ttftMs, undefined)
+      for (const [k, v] of Object.entries(want[e.id])) assert.equal(r[k as keyof RequestResult], v, e.id)
+      if (e.id === 'refuse') assert.equal(r.status, undefined)
+    }
+    const t = await streamChat(eps[0], '', P, 0, 0, { timeoutMs: 30 })
+    assert.equal(t.errorKind, 'timeout')
+  } finally { server.close(); rmSync(dir, { recursive: true, force: true }) }
+})
+
 test('generated Node script refuses to run without the key environment variables', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'tb-'))
   writeFileSync(join(dir, 'tb.mjs'), nodeScript([{ ...EP, baseUrl: 'https://api.example.com/v1' }], [P], { reps: 1, concurrency: 1, rampMs: 0, timeoutMs: 1000, temperature: 0 }))
