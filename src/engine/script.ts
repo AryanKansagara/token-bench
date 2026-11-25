@@ -18,13 +18,14 @@ async function one(ep, p, rep, startedAt) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), CONFIG.config.timeoutMs)
   const t0 = performance.now(), chunks = []
-  let text = '', reasoning = '', usage, streamError, buf = '', ended = false
+  let text = '', reasoning = '', usage, streamError, buf = '', ended = false, status
   const messages = (p.system ? [{ role: 'system', content: p.system }] : []).concat([{ role: 'user', content: p.user }])
   const body = { model: ep.model, messages, stream: true, max_tokens: p.maxTokens, temperature: CONFIG.config.temperature }
   if (ep.streamOptions) body.stream_options = { include_usage: true }
   if (p.json) body.response_format = { type: 'json_object' }
   try {
     const res = await fetch(url(ep.baseUrl), { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, key ? { Authorization: 'Bearer ' + key } : {}), body: JSON.stringify(body), signal: ctrl.signal })
+    status = res.status
     if (!res.ok) {
       const t = hide(await res.text().catch(() => '')).slice(0, 300)
       return Object.assign(base, { status: res.status, errorKind: res.status === 429 ? 'rate_limit' : 'http', error: 'HTTP ' + res.status + (t ? ': ' + t : ''), totalMs: performance.now() - t0 })
@@ -58,6 +59,7 @@ async function one(ep, p, rep, startedAt) {
   } catch (e) {
     const totalMs = performance.now() - t0
     if (ctrl.signal.aborted) return Object.assign(base, { errorKind: 'timeout', error: 'Timed out after ' + CONFIG.config.timeoutMs + ' ms', totalMs })
+    if (status !== undefined) return Object.assign(base, { status, errorKind: 'stream', error: chunks.length ? 'Connection lost mid-stream after ' + chunks.length + ' chunk' + (chunks.length === 1 ? '' : 's') : 'Connection lost after the provider answered, before any content', totalMs, chunks })
     return Object.assign(base, { errorKind: 'network', error: hide(e && e.cause ? e.cause.message || e.cause : e), totalMs })
   } finally { clearTimeout(timer) }
 }

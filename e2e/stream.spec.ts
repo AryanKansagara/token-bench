@@ -54,7 +54,8 @@ test.describe('streaming classification against an in-process stub', () => {
       expect(r.ttftMs).toBeUndefined()
     }
 
-    expect(one('cut-reset')).toMatchObject({ ok: false, errorKind: 'network' })
+    expect(one('cut-reset')).toMatchObject({ ok: false, status: 200, errorKind: 'stream', error: 'Connection lost mid-stream after 3 chunks' })
+    expect(one('cut-reset').ttftMs).toBeUndefined()
     expect(one('cut-eof')).toMatchObject({ ok: false, status: 200, errorKind: 'stream', error: 'Stream ended before [DONE], after 3 chunks' })
     expect(one('cut-eof').ttftMs).toBeUndefined()
     expect(one('done-only')).toMatchObject({ ok: false, errorKind: 'stream', error: 'Stream finished without any content' })
@@ -93,7 +94,7 @@ test.describe('streaming classification against an in-process stub', () => {
     await expect(kind('Bad key')).toHaveText('http')
     await expect(kind('Stalled stream')).toHaveText('timeout')
     await expect(kind('Never answers')).toHaveText('timeout')
-    await expect(kind('Connection reset')).toHaveText('network')
+    await expect(kind('Connection reset')).toHaveText('stream')
     await expect(kind('Error mid stream')).toHaveText('stream')
   })
 
@@ -106,5 +107,29 @@ test.describe('streaming classification against an in-process stub', () => {
     await runBenchmark(page, { timeoutMs: 1500 })
     const { byName } = await latestRunResults(page)
     expect(byName.get(NAMES['cut-eof'])![0]).toMatchObject({ ok: false })
+  })
+
+  // https://github.com/AryanKansagara/token-bench/issues/6
+  test('a connection reset mid-stream is not blamed on CORS; a refused connection still is', async ({ page, stub }) => {
+    await createBenchmark(page, 'Reset')
+    const card = await addEndpoint(page, { name: NAMES['cut-reset'], baseUrl: stub.baseUrl('cut-reset') })
+    await card.getByRole('button', { name: 'Test connection' }).click()
+    await expect(card.getByRole('alert')).toHaveText('Connection lost mid-stream after 3 chunks')
+    await expect(page.getByText('The browser blocked this request')).toHaveCount(0)
+    await runBenchmark(page)
+    await expect(page.getByText('The browser blocked this request')).toHaveCount(0)
+    await tab(page, 'Results').click()
+    await expect(page.getByText(/^Errors \(1\)/)).toBeVisible()
+    await expect(page.getByText('failed before reaching the provider')).toHaveCount(0)
+
+    await page.route(stub.baseUrl('ok') + '/**', route => route.abort('connectionrefused'))
+    await tab(page, 'Endpoints').click()
+    await page.reload() // clears the first run's notice
+    await expect(page.locator('.ep-card')).toHaveCount(1)
+    await addEndpoint(page, { name: 'Refused', baseUrl: stub.baseUrl('ok') })
+    await runBenchmark(page)
+    await expect(page.getByText('The browser blocked this request')).toBeVisible()
+    await tab(page, 'Results').click()
+    await expect(page.getByText('1 request failed before reaching the provider')).toBeVisible()
   })
 })

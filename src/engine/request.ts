@@ -56,6 +56,7 @@ async function stream(ep: Endpoint, apiKey: string, p: Prompt, rep: number, star
   let streamError: string | undefined
   let sawDone = false
   let finished = false
+  let status: number | undefined
   try {
     const res = await f(chatUrl(ep.baseUrl), {
       method: 'POST',
@@ -63,6 +64,7 @@ async function stream(ep: Endpoint, apiKey: string, p: Prompt, rep: number, star
       body: JSON.stringify(requestBody(ep, p, o.temperature)),
       signal: ctrl.signal,
     })
+    status = res.status
     if (!res.ok) {
       const body = await res.text().catch(() => '')
       let message = body
@@ -110,7 +112,9 @@ async function stream(ep: Endpoint, apiKey: string, p: Prompt, rep: number, star
     const totalMs = now() - t0
     if (timedOut) return { ...base, errorKind: 'timeout', error: `Timed out after ${o.timeoutMs} ms`, totalMs }
     if (o.signal?.aborted) return { ...base, errorKind: 'aborted', error: 'Cancelled', totalMs }
-    // Browsers report CORS refusals, DNS failures and connection resets as the same opaque TypeError.
+    // The provider answered, so neither CORS nor the address is the problem: the connection broke while reading.
+    if (status !== undefined) return { ...base, status, errorKind: 'stream', error: chunks.length ? `Connection lost mid-stream after ${chunks.length} chunk${chunks.length === 1 ? '' : 's'}` : 'Connection lost after the provider answered, before any content', totalMs, chunks }
+    // Browsers report CORS refusals, DNS failures and resets before the reply as the same opaque TypeError.
     return { ...base, errorKind: 'network', error: e instanceof Error ? e.message : String(e), totalMs }
   } finally {
     clearTimeout(timer)
