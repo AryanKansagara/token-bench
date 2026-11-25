@@ -6,15 +6,31 @@ import { DEFAULT_LOOP } from './projectData.ts'
 import { defaultConfig, saveProject, useProjects, uuid } from './store.ts'
 import { go, toast } from './ui.tsx'
 
+/** "Skip to content" moves to #main, which is not a share link. */
+const isAnchor = () => location.hash === '#main'
+
 /** Opens a share link (#r=...) or an uploaded result file, then files it under an existing or new benchmark. */
 export default function Share() {
   const list = useProjects()
   const [imp, setImp] = useState<{ run: Run | null; issues: Issue[] } | null>(null)
   const [target, setTarget] = useState('new')
+  const [hash, setHash] = useState(() => isAnchor() ? '' : location.hash)
   useEffect(() => {
-    const m = location.hash.match(/r=([\w-]+)/)
-    if (m) decodeShare(m[1]).then(t => setImp(importRun(t)), () => setImp({ run: null, issues: [{ line: 1, level: 'error', message: 'This share link is damaged or truncated. Ask for the JSON file instead.' }] }))
+    // A second link opened in the same tab changes only the fragment, and the page is not reloaded.
+    const onHash = () => { if (!isAnchor()) setHash(location.hash) }
+    addEventListener('hashchange', onHash)
+    return () => removeEventListener('hashchange', onHash)
   }, [])
+  useEffect(() => {
+    let current = true
+    const show = (i: typeof imp) => { if (current) setImp(i) }
+    setImp(null)
+    if (hash.length > 1) {
+      const m = hash.match(/r=([\w-]+)/)
+      ;(m ? decodeShare(m[1]) : Promise.reject(new Error('no payload'))).then(t => show(importRun(t)), () => show({ run: null, issues: [{ line: 1, level: 'error', message: 'This share link is damaged or truncated. Ask for the JSON file instead.' }] }))
+    }
+    return () => { current = false }
+  }, [hash])
   const add = async (run: Run) => {
     const now = Date.now()
     const existing = list?.find(p => p.id === target)
@@ -41,7 +57,7 @@ export default function Share() {
             </label>
           )}
           <ImportReport imp={imp} onAdd={r => void add(r)} onCancel={() => go('/app')} />
-        </> : !location.hash && <p className="muted small">Or open a share link someone sent you.</p>}
+        </> : hash.length <= 1 && <p className="muted small">Or open a share link someone sent you.</p>}
       </div>
     </section>
   )
