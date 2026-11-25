@@ -98,17 +98,49 @@ test.describe('share links', () => {
 
   // https://github.com/AryanKansagara/token-bench/issues/4
   test('opening a second link in the same tab shows the second link', async ({ page }) => {
-    test.fail(true, 'Known bug: the share page reads the fragment once, so the first link stays on screen (https://github.com/AryanKansagara/token-bench/issues/4)')
     await page.goto(`/app/share#r=${encode(sharedRun({ label: 'First link' }))}`)
     await expect(page.getByText('First link: 1 requests')).toBeVisible()
     await page.goto(`/app/share#r=${encode(sharedRun({ label: 'Second link' }))}`)
-    await expect(page.getByText('Second link: 1 requests')).toBeVisible({ timeout: 3000 })
+    await expect(page.getByText('Second link: 1 requests')).toBeVisible()
+    await expect(page.getByText('First link')).toHaveCount(0)
+    // Back and forward follow the address too, a damaged link replaces a good one, and what is added is what is shown.
+    await page.goBack()
+    await expect(page.getByText('First link: 1 requests')).toBeVisible()
+    await page.goto('/app/share#r=AAAAAAAAAAAAAAAA')
+    await expect(page.getByText(/damaged or truncated/)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Add to history' })).toHaveCount(0)
+    await page.goto(`/app/share#r=${encode(sharedRun({ label: 'Second link' }))}`)
+    await expect(page.getByText('Second link: 1 requests')).toBeVisible()
+    await page.getByRole('button', { name: 'Add to history' }).click()
+    await expect(page).toHaveURL(/\/overview\?run=/)
+    expect((await idbDump(page)).projects.flatMap(p => p.runs.map(r => r.label))).toEqual(['Second link'])
+  })
+
+  test('a file chosen on the page stays when the address does not change, and no fragment is not an error', async ({ page }) => {
+    await page.goto('/app/share')
+    await expect(page.getByText('Or open a share link someone sent you.')).toBeVisible()
+    await page.locator('input[type=file]').setInputFiles({ name: 'r.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(sharedRun({ label: 'From a file' }))) })
+    await expect(page.getByText('From a file: 1 requests')).toBeVisible()
+    await expect(page.getByText(/damaged or truncated/)).toHaveCount(0)
   })
 
   // https://github.com/AryanKansagara/token-bench/issues/4
-  test('a link with an empty payload says it is damaged', async ({ page }) => {
-    test.fail(true, 'Known bug: a fragment without a usable r= payload shows no message (https://github.com/AryanKansagara/token-bench/issues/4)')
-    await page.goto('/app/share#r=')
-    await expect(page.getByText(/damaged or truncated/)).toBeVisible({ timeout: 3000 })
+  test('"Skip to content" keeps the shared result on screen', async ({ page }) => {
+    await page.goto(`/app/share#r=${encode(sharedRun({ label: 'Kept' }))}`)
+    await expect(page.getByText('Kept: 1 requests')).toBeVisible()
+    await page.getByRole('link', { name: 'Skip to content' }).focus()
+    await page.keyboard.press('Enter')
+    await expect(page).toHaveURL(/#main$/)
+    await expect(page.getByText('Kept: 1 requests')).toBeVisible()
+    await expect(page.getByText(/damaged or truncated/)).toHaveCount(0)
+    await page.reload()
+    await expect(page.getByText('Or open a share link someone sent you.')).toBeVisible()
   })
+
+  for (const hash of ['#r=', '#foo', '#R=abc', '#r=%25'])
+    test(`a link with no usable payload (${hash}) says it is damaged`, async ({ page }) => {
+      await page.goto(`/app/share${hash}`)
+      await expect(page.getByText(/damaged or truncated/)).toBeVisible()
+      await expect(page.getByText('Nothing could be imported.')).toBeVisible()
+    })
 })
