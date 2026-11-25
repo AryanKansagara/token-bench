@@ -5,7 +5,7 @@ import { compareRuns, decodeTps, interTokenLatencies, leaderboard, promptMatrix,
 import type { Run } from './engine/types.ts'
 import { DotPlot, ItlHistograms, Legend, RaceChart, Timeline } from './charts.tsx'
 import { colorOf, latestRun } from './projectData.ts'
-import { getDefaults, saveProject, useProjects, type Project } from './store.ts'
+import { getDefaults, saveProject, useProjects, withoutKeys, type Project } from './store.ts'
 import { deleteRunCloud } from './sync.ts'
 import { CopyButton, download, Empty, fmtDate, fmtMs, fmtTps, go, Link, Modal, SyntheticBadge, toast } from './ui.tsx'
 
@@ -115,9 +115,10 @@ function Results({ project, run, by, setBy, onPick }: { project: Project; run: R
   const errors = run.results.filter(r => !r.ok && r.errorKind !== 'aborted')
   const networkFails = errors.filter(r => r.errorKind === 'network').length
   const best = sums[0]
+  const safe = () => withoutKeys([run])[0]
   const share = async () => {
     try {
-      const s = await encodeShare(run)
+      const s = await encodeShare(safe())
       const url = `${location.origin}/app/share#r=${s}`
       await navigator.clipboard.writeText(url)
       toast(`Share link copied (${Math.round(url.length / 1000)}k characters). It contains summary timings and prompt names, never keys.`, { tone: 'ok' })
@@ -130,8 +131,8 @@ function Results({ project, run, by, setBy, onPick }: { project: Project; run: R
         {project.runs.length > 1 ? <RunPicker project={project} run={run} onPick={onPick} /> : <span className="muted small">{run.label} · {fmtDate(run.createdAt)}</span>}
         <span className="muted small">{run.results.length} requests · {run.config.reps}× each · concurrency {run.config.concurrency}{run.durationMs ? ` · ${fmtMs(run.durationMs)} wall clock` : ''}{run.source === 'node' ? ' · terminal run' : ''}</span>
         <div className="row gap-sm wrap push">
-          <button type="button" className="btn ghost sm" onClick={() => download(`${slug}.csv`, resultsCsv(run, decodeTps))}>CSV</button>
-          <button type="button" className="btn ghost sm" onClick={() => download(`${slug}.json`, exportRunJson(run), 'application/json')}>JSON</button>
+          <button type="button" className="btn ghost sm" onClick={() => download(`${slug}.csv`, resultsCsv(safe(), decodeTps))}>CSV</button>
+          <button type="button" className="btn ghost sm" onClick={() => download(`${slug}.json`, exportRunJson(safe()), 'application/json')}>JSON</button>
           <button type="button" className="btn ghost sm" onClick={() => void share()}>Copy share link</button>
           <Link className="btn ghost sm" href={`/app/p/${project.id}/report?run=${run.id}`}>Report</Link>
         </div>

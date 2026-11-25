@@ -3,20 +3,19 @@ import { OK_TOKENS, OK_TTFT_MS, type Scenario } from './stub.ts'
 
 // One benchmark with one endpoint per stub scenario, run once from the Run tab, then every
 // scenario's recorded result is checked, and the Results page is checked for what a reader sees.
-const NAMES: Record<Exclude<Scenario, 'echo-key'>, string> = {
+const NAMES: Record<Exclude<Scenario, 'echo-key' | 'echo-stream'>, string> = {
   ok: 'Clean stream', nousage: 'No usage chunk', rate: 'Rate limited', unauthorized: 'Bad key', 'server-error': 'Server error',
   'midstream-error': 'Error mid stream', malformed: 'Malformed chunk', stall: 'Stalled stream', 'stall-headers': 'Never answers',
   'cut-reset': 'Connection reset', 'cut-eof': 'Ends early', 'done-only': 'Empty stream', html: 'HTML page', json: 'Not streamed',
 }
 
 type Named = keyof typeof NAMES
-const MATRIX = (Object.keys(NAMES) as Named[]).filter(s => s !== 'cut-eof')
+const MATRIX = Object.keys(NAMES) as Named[]
 
 test.describe('streaming classification against an in-process stub', () => {
   test('records TTFT, tokens and classification for each way a provider can answer', async ({ page, stub }) => {
     test.setTimeout(180_000)
     await createBenchmark(page, 'Stub classification')
-    // `cut-eof` has its own test below: it is a known bug, and would be ranked here.
     for (const [scenario, name] of MATRIX.map(s => [s, NAMES[s]] as const)) {
       await addEndpoint(page, { name, baseUrl: stub.baseUrl(scenario), key: scenario === 'ok' ? FAKE_KEY : undefined })
     }
@@ -55,7 +54,10 @@ test.describe('streaming classification against an in-process stub', () => {
       expect(r.ttftMs).toBeUndefined()
     }
 
-    expect(one('cut-reset')).toMatchObject({ ok: false, errorKind: 'network' })
+    expect(one('cut-reset')).toMatchObject({ ok: false, status: 200, errorKind: 'stream', error: 'Connection lost mid-stream after 3 chunks' })
+    expect(one('cut-reset').ttftMs).toBeUndefined()
+    expect(one('cut-eof')).toMatchObject({ ok: false, status: 200, errorKind: 'stream', error: 'Stream ended before [DONE], after 3 chunks' })
+    expect(one('cut-eof').ttftMs).toBeUndefined()
     expect(one('done-only')).toMatchObject({ ok: false, errorKind: 'stream', error: 'Stream finished without any content' })
     expect(one('html')).toMatchObject({ ok: false, errorKind: 'stream', error: 'Stream ended without content or [DONE]' })
     expect(one('json')).toMatchObject({ ok: false, errorKind: 'stream', error: 'Stream ended without content or [DONE]' })
@@ -75,7 +77,7 @@ test.describe('streaming classification against an in-process stub', () => {
     // Two endpoints succeeded and are ranked; every other row has no rank and no timings.
     const ranked = await rows.evaluateAll(trs => trs.map(tr => tr.querySelector('td')!.textContent))
     expect(ranked.filter(r => r !== '–').sort()).toEqual(['1', '2'])
-    for (const name of ['Rate limited', 'Bad key', 'Server error', 'Stalled stream', 'Never answers', 'Connection reset', 'Empty stream', 'HTML page', 'Not streamed']) {
+    for (const name of ['Rate limited', 'Bad key', 'Server error', 'Stalled stream', 'Never answers', 'Connection reset', 'Ends early', 'Empty stream', 'HTML page', 'Not streamed']) {
       const cells = rowOf(name).locator('td')
       await expect(cells.nth(0), name).toHaveText('–')
       await expect(cells.nth(2), name).toHaveText('n/a')
@@ -92,17 +94,42 @@ test.describe('streaming classification against an in-process stub', () => {
     await expect(kind('Bad key')).toHaveText('http')
     await expect(kind('Stalled stream')).toHaveText('timeout')
     await expect(kind('Never answers')).toHaveText('timeout')
-    await expect(kind('Connection reset')).toHaveText('network')
+    await expect(kind('Connection reset')).toHaveText('stream')
     await expect(kind('Error mid stream')).toHaveText('stream')
   })
 
   // https://github.com/AryanKansagara/token-bench/issues/2
   test('a stream that ends early without [DONE] is a failure, not a result', async ({ page, stub }) => {
-    test.fail(true, 'Known bug: a stream cut off cleanly after some content is recorded as a successful, fast request (https://github.com/AryanKansagara/token-bench/issues/2)')
     await createBenchmark(page, 'Cut off')
-    await addEndpoint(page, { name: NAMES['cut-eof'], baseUrl: stub.baseUrl('cut-eof') })
+    const card = await addEndpoint(page, { name: NAMES['cut-eof'], baseUrl: stub.baseUrl('cut-eof') })
+    await card.getByRole('button', { name: 'Test connection' }).click()
+    await expect(card.getByRole('alert')).toContainText('Stream ended before [DONE]')
     await runBenchmark(page, { timeoutMs: 1500 })
     const { byName } = await latestRunResults(page)
     expect(byName.get(NAMES['cut-eof'])![0]).toMatchObject({ ok: false })
+  })
+
+  // https://github.com/AryanKansagara/token-bench/issues/6
+  test('a connection reset mid-stream is not blamed on CORS; a refused connection still is', async ({ page, stub }) => {
+    await createBenchmark(page, 'Reset')
+    const card = await addEndpoint(page, { name: NAMES['cut-reset'], baseUrl: stub.baseUrl('cut-reset') })
+    await card.getByRole('button', { name: 'Test connection' }).click()
+    await expect(card.getByRole('alert')).toHaveText('Connection lost mid-stream after 3 chunks')
+    await expect(page.getByText('The browser blocked this request')).toHaveCount(0)
+    await runBenchmark(page)
+    await expect(page.getByText('The browser blocked this request')).toHaveCount(0)
+    await tab(page, 'Results').click()
+    await expect(page.getByText(/^Errors \(1\)/)).toBeVisible()
+    await expect(page.getByText('failed before reaching the provider')).toHaveCount(0)
+
+    await page.route(stub.baseUrl('ok') + '/**', route => route.abort('connectionrefused'))
+    await tab(page, 'Endpoints').click()
+    await page.reload() // clears the first run's notice
+    await expect(page.locator('.ep-card')).toHaveCount(1)
+    await addEndpoint(page, { name: 'Refused', baseUrl: stub.baseUrl('ok') })
+    await runBenchmark(page)
+    await expect(page.getByText('The browser blocked this request')).toBeVisible()
+    await tab(page, 'Results').click()
+    await expect(page.getByText('1 request failed before reaching the provider')).toBeVisible()
   })
 })

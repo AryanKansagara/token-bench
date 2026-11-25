@@ -103,7 +103,7 @@ export default function Docs() {
           <dt>Jitter</dt><dd>Median absolute change between consecutive inter-token gaps. Zero for a perfectly steady stream; robust to a single stall.</dd>
           <dt>Consistency</dt><dd>Coefficient of variation (standard deviation ÷ mean) of decode speed across requests.</dd>
           <dt>Percentiles and intervals</dt><dd>Linear interpolation (numpy default). Intervals are 95% percentile bootstrap on the median with 1,000 resamples and a fixed seed.</dd>
-          <dt>Error and 429 rate</dt><dd>Failed requests over all completed requests; cancelled requests are excluded. Failed requests are not counted in cost.</dd>
+          <dt>Error and 429 rate</dt><dd>A stream that closes with neither <code>[DONE]</code> nor a finish reason counts as failed, because it was cut off. Failed requests over all completed requests; cancelled requests are excluded. Failed requests are not counted in cost.</dd>
           <dt>Token approximation</dt><dd>When no usage chunk arrives: the average of characters ÷ 4 and words × 0.75, typically within about 10% of BPE tokenizers for English and code.</dd>
           <dt>Agent loop estimate</dt><dd>2,000 Monte Carlo draws of measured (TTFT, decode speed) pairs per call. If the run includes prompts of very different lengths and TTFT rises with input, TTFT is modelled as a line in input tokens plus a resampled residual.</dd>
         </dl>
@@ -114,6 +114,7 @@ export default function Docs() {
         <h2 id="privacy">Keys and privacy</h2>
         <ul>
           <li>API keys are stored in this browser's IndexedDB, sent only to the endpoint they belong to, and never synced, exported or included in share links or terminal scripts.</li>
+          <li>If a provider repeats your key in a reply, Token Bench replaces it with <code>[key hidden]</code> before showing or saving the text, including in runs saved earlier and in encoded, cut or masked form. It cannot recognise a hash of the key, unusual transforms, or scraps under 8 characters, so read error text before you share it.</li>
           <li>Requests go directly from your browser to the provider; there is no proxy.</li>
           <li>Signing in is optional. It syncs benchmark names, endpoints (without keys), prompts and runs. Runs over 1.5 MB sync without per-chunk timings, which stay on the device that recorded them.</li>
           <li>The account menu exports all your data as JSON and deletes cloud data or the whole account.</li>

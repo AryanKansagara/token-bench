@@ -1,14 +1,14 @@
 // Optional cloud sync. Local-first: everything works signed out; signing in merges projects by id, last write wins.
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { clearTombstones, getProjects, loadProjects, onProjectChange, saveProject, tombstones, type Project } from './store.ts'
+import { clearTombstones, getProjects, loadProjects, onProjectChange, saveProject, tombstones, withoutKeys, type Project } from './store.ts'
 import type { Run } from './engine/types.ts'
 
 export const APP_ID = 'token-bench'
 /** Runs whose per-chunk timings push them past this stay summarised in the cloud; the full timings stay on the device. */
 export const RUN_SYNC_LIMIT = 1_500_000
 
-/** API keys are never on a run or a project, so nothing here can upload them. Large runs lose chunk timings and text. */
+/** API keys are never on a run or a project, and runs are cleaned of echoed keys before upload. Large runs lose chunk timings and text. */
 export function cloudRun(r: Run): Run {
   return JSON.stringify(r).length <= RUN_SYNC_LIMIT ? r : { ...r, results: r.results.map(({ chunks: _c, text: _t, ...x }) => x) }
 }
@@ -154,11 +154,24 @@ async function doSync() {
       if (!now) continue
       const missingUp = now.runs.filter(s => !cvs.some(v => v.id === s.id))
       if (missingUp.length) {
-        const { error: e2 } = await c.from('project_versions').insert(missingUp.map(s => ({ id: s.id, project_id: id, label: s.label, data: cloudRun(s) })))
+        const { error: e2 } = await c.from('project_versions').insert(withoutKeys(missingUp).map(s => ({ id: s.id, project_id: id, label: s.label, data: cloudRun(s) })))
         if (e2) throw e2
       }
       const missingDown = cvs.filter(v => !now.runs.some(s => s.id === v.id))
       if (missingDown.length) await saveProject({ ...now, runs: [...now.runs, ...missingDown].sort((a, b) => a.createdAt - b.createdAt) }, { touch: false, silent: true })
+      // Runs uploaded by an older version can contain a key a provider echoed: replace the cloud copy.
+      const cleaned = withoutKeys(cvs)
+      for (const [i, v] of cleaned.entries()) {
+        if (v === cvs[i]) continue
+        const { data: done, error: e3 } = await c.from('project_versions').update({ data: v }).eq('id', v.id).select('id')
+        if (e3) throw e3
+        if (done?.length) continue
+        // Updating is not permitted here. The run is saved on this device by now, so put it back as a new row.
+        const { error: e4 } = await c.from('project_versions').delete().eq('id', v.id)
+        if (e4) throw e4
+        const { error: e5 } = await c.from('project_versions').insert({ id: v.id, project_id: id, label: v.label, data: cloudRun(v) })
+        if (e5) throw e5
+      }
     }
     set({ status: 'synced', lastSynced: Date.now() })
   } catch (e) {

@@ -21,7 +21,7 @@ export interface Stub {
 
 export const SCENARIOS = [
   'ok', 'nousage', 'rate', 'unauthorized', 'server-error', 'midstream-error', 'malformed',
-  'stall', 'stall-headers', 'cut-reset', 'cut-eof', 'done-only', 'html', 'json', 'echo-key',
+  'stall', 'stall-headers', 'cut-reset', 'cut-eof', 'done-only', 'html', 'json', 'echo-key', 'echo-stream',
 ] as const
 export type Scenario = typeof SCENARIOS[number]
 
@@ -108,6 +108,13 @@ export async function startStub(): Promise<Stub> {
       case 'echo-key':
         // Some providers repeat the credential they were sent in their error text.
         return json(401, { error: { message: `Incorrect API key provided: ${authorization?.replace(/^Bearer /, '')}.` } })
+      case 'echo-stream': {
+        // Repeats the credential in generated text, then in an error inside the stream, percent-encoded.
+        const key = authorization?.replace(/^Bearer /, '') ?? ''
+        open()
+        res.write(delta(`You sent ${key}`))
+        return void res.end(sse({ error: { message: `rejected key=${[...key].map(c => '%' + c.charCodeAt(0).toString(16)).join('')} (${key.slice(0, 6)}***${key.slice(-4)})` } }))
+      }
       default:
         return json(404, { error: { message: `unknown stub scenario ${scenario}` } })
     }
