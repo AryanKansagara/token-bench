@@ -55,6 +55,7 @@ async function stream(ep: Endpoint, apiKey: string, p: Prompt, rep: number, star
   let usage: { prompt_tokens?: number; completion_tokens?: number } | undefined
   let streamError: string | undefined
   let sawDone = false
+  let finished = false
   try {
     const res = await f(chatUrl(ep.baseUrl), {
       method: 'POST',
@@ -72,6 +73,7 @@ async function stream(ep: Endpoint, apiKey: string, p: Prompt, rep: number, star
     const parser = createSseParser(ev => {
       const d = parseChatData(ev.data, hide)
       if (d.done) { sawDone = true; return }
+      if (d.finishReason) finished = true
       if (d.error) { streamError = hide(d.error); return }
       if (d.content || d.reasoning) {
         chunks.push(now() - t0)
@@ -93,6 +95,8 @@ async function stream(ep: Endpoint, apiKey: string, p: Prompt, rep: number, star
     const totalMs = now() - t0
     if (streamError) return { ...base, status: res.status, errorKind: 'stream', error: streamError, totalMs, chunks }
     if (!chunks.length) return { ...base, status: res.status, errorKind: 'stream', error: sawDone ? 'Stream finished without any content' : 'Stream ended without content or [DONE]', totalMs }
+    // Some servers omit [DONE] but send a finish reason. With neither, something closed the stream early and its timings are not a result.
+    if (!sawDone && !finished) return { ...base, status: res.status, errorKind: 'stream', error: `Stream ended before [DONE], after ${chunks.length} chunk${chunks.length === 1 ? '' : 's'}`, totalMs, chunks }
     const exact = usage?.completion_tokens
     return {
       ...base, ok: true, status: res.status, ttftMs: chunks[0], totalMs,
