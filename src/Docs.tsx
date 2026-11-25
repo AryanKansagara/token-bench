@@ -114,6 +114,7 @@ export default function Docs() {
         <h2 id="privacy">Keys and privacy</h2>
         <ul>
           <li>API keys are stored in this browser's IndexedDB, sent only to the endpoint they belong to, and never synced, exported or included in share links or terminal scripts.</li>
+          <li>If a provider repeats your key in a reply, Token Bench replaces it with <code>[key hidden]</code> before showing or saving the text, including in runs saved earlier and in encoded, cut or masked form. It cannot recognise a hash of the key, unusual transforms, or scraps under 8 characters, so read error text before you share it.</li>
           <li>Requests go directly from your browser to the provider; there is no proxy.</li>
           <li>Signing in is optional. It syncs benchmark names, endpoints (without keys), prompts and runs. Runs over 1.5 MB sync without per-chunk timings, which stay on the device that recorded them.</li>
           <li>The account menu exports all your data as JSON and deletes cloud data or the whole account.</li>

@@ -1,4 +1,5 @@
 // One streamed chat completion, timed. Transport and clock are injectable so the runner is testable.
+import { cleanResult, keyHider } from './redact.ts'
 import { approxTokens, createSseParser, parseChatData } from './sse.ts'
 import type { Endpoint, Prompt, RequestResult } from './types.ts'
 
@@ -30,7 +31,15 @@ export function requestBody(ep: Endpoint, p: Prompt, temperature = 0) {
   }
 }
 
+/** The key never leaves this function except in the request: provider text that repeats it is cleaned first. */
 export async function streamChat(ep: Endpoint, apiKey: string, p: Prompt, rep: number, startedAt: number, o: RequestOpts = {}): Promise<RequestResult> {
+  return cleanResult(await stream(ep, apiKey, p, rep, startedAt, o), [apiKey])
+}
+
+async function stream(ep: Endpoint, apiKey: string, p: Prompt, rep: number, startedAt: number, o: RequestOpts): Promise<RequestResult> {
+  // Text is cleaned before it is cut to length, so a cut cannot leave half a key behind.
+  const hideKey = keyHider([apiKey])
+  const hide = (s: unknown) => hideKey(String(s).slice(0, 20_000))
   const f = o.fetch ?? fetch
   const now = o.now ?? (() => performance.now())
   const base: RequestResult = { endpointId: ep.id, promptId: p.id, rep, startedAt, ok: false }
@@ -55,15 +64,15 @@ export async function streamChat(ep: Endpoint, apiKey: string, p: Prompt, rep: n
     })
     if (!res.ok) {
       const body = await res.text().catch(() => '')
-      let message = body.slice(0, 300)
+      let message = body
       try { const j = JSON.parse(body); message = j.error?.message ?? j.message ?? j.error ?? message } catch { /* plain text body */ }
-      return { ...base, status: res.status, errorKind: res.status === 429 ? 'rate_limit' : 'http', error: `HTTP ${res.status}${message ? `: ${String(message).slice(0, 300)}` : ''}`, totalMs: now() - t0 }
+      return { ...base, status: res.status, errorKind: res.status === 429 ? 'rate_limit' : 'http', error: `HTTP ${res.status}${message ? `: ${hide(message).slice(0, 300)}` : ''}`, totalMs: now() - t0 }
     }
     if (!res.body) return { ...base, status: res.status, errorKind: 'stream', error: 'Response had no body to stream', totalMs: now() - t0 }
     const parser = createSseParser(ev => {
-      const d = parseChatData(ev.data)
+      const d = parseChatData(ev.data, hide)
       if (d.done) { sawDone = true; return }
-      if (d.error) { streamError = d.error; return }
+      if (d.error) { streamError = hide(d.error); return }
       if (d.content || d.reasoning) {
         chunks.push(now() - t0)
         text += d.content
@@ -91,7 +100,7 @@ export async function streamChat(ep: Endpoint, apiKey: string, p: Prompt, rep: n
       inputTokens: usage?.prompt_tokens ?? approxTokens((p.system ?? '') + p.user),
       tokenSource: exact !== undefined ? 'usage' : 'approx',
       chunks: chunks.map(c => Math.round(c * 10) / 10),
-      text: text.slice(0, o.keepText ?? 2000),
+      text: hide(text).slice(0, o.keepText ?? 2000),
     }
   } catch (e) {
     const totalMs = now() - t0

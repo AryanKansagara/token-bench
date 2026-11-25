@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { cleanRun } from './engine/redact.ts'
 import type { Endpoint, Prompt, Run, RunConfig } from './engine/types.ts'
 
 export interface Project {
@@ -60,12 +61,40 @@ async function idbDel(store: StoreName, key: string) {
 
 // ---------- API keys: this device only, never part of a project, never synced or exported ----------
 
-export const getKey = async (endpointId: string) => (await idbGet<string>('keys', endpointId)) ?? ''
-export const setKey = (endpointId: string, key: string) => key ? idbPut('keys', key, endpointId) : idbDel('keys', endpointId)
+export async function getKey(endpointId: string) {
+  const key = (await idbGet<string>('keys', endpointId)) ?? ''
+  if (key) known.add(key)
+  return key
+}
+export async function setKey(endpointId: string, key: string) {
+  if (key && !known.has(key)) { known.add(key); clean = new WeakSet() }
+  await (key ? idbPut('keys', key, endpointId) : idbDel('keys', endpointId))
+}
 export async function getKeys(ids: string[]): Promise<Record<string, string>> {
   const out: Record<string, string> = {}
   for (const id of ids) out[id] = await getKey(id)
   return out
+}
+
+// Provider text in a saved run can repeat a key (older versions stored it as it came, and imported or
+// synced runs can contain anything), so every run is cleaned when it is loaded, saved, exported or uploaded.
+/** Runs already checked against the current keys. */
+let clean = new WeakSet<Run>()
+/** Keys seen on this device since the page loaded, in memory only, so that saving stays synchronous and in order. */
+const known = new Set<string>()
+export function withoutKeys<T extends Run[] | undefined>(runs: T): T {
+  if (!Array.isArray(runs) || runs.every(r => clean.has(r))) return runs
+  // Keys under 8 characters are placeholders ("test", "ollama") or still being typed; blanking them would damage saved messages.
+  const keys = [...known].filter(k => k.trim().length >= 8)
+  let changed = false
+  const out = runs.map(r => {
+    if (!r || typeof r !== 'object' || clean.has(r)) return r
+    const c = cleanRun(r, keys)
+    clean.add(c)
+    changed ||= c !== r
+    return c
+  })
+  return changed ? out as T : runs
 }
 
 // ---------- In-memory project list with subscribers ----------
@@ -79,7 +108,15 @@ const changeHooks = new Set<(p: Project) => void>()
 export const onProjectChange = (f: (p: Project) => void) => { changeHooks.add(f); return () => changeHooks.delete(f) }
 
 export async function loadProjects() {
-  projects = (await idbGetAll<Project>('projects')).sort((a, b) => b.updatedAt - a.updatedAt)
+  for (const k of await idbGetAll<unknown>('keys')) if (typeof k === 'string') known.add(k)
+  const stored = await idbGetAll<Project>('projects')
+  projects = (await Promise.all(stored.map(async p => {
+    const runs = withoutKeys(p.runs)
+    if (runs === p.runs) return p
+    const next = { ...p, runs }
+    await idbPut('projects', next)
+    return next
+  }))).sort((a, b) => b.updatedAt - a.updatedAt)
   loaded = true
   emit()
 }
@@ -92,7 +129,8 @@ export const getProjects = () => projects
 export const getProject = (id: string) => projects.find(p => p.id === id)
 
 export async function saveProject(p: Project, opts: { touch?: boolean; silent?: boolean } = {}) {
-  const next = opts.touch === false ? p : { ...p, updatedAt: Date.now() }
+  const runs = withoutKeys(p.runs)
+  const next = { ...p, runs, updatedAt: opts.touch === false ? p.updatedAt : Date.now() }
   await idbPut('projects', next)
   const i = projects.findIndex(x => x.id === p.id)
   if (i >= 0) projects[i] = next

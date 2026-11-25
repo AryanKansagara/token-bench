@@ -3,7 +3,7 @@ import { OK_TOKENS, OK_TTFT_MS, type Scenario } from './stub.ts'
 
 // One benchmark with one endpoint per stub scenario, run once from the Run tab, then every
 // scenario's recorded result is checked, and the Results page is checked for what a reader sees.
-const NAMES: Record<Exclude<Scenario, 'echo-key'>, string> = {
+const NAMES: Record<Exclude<Scenario, 'echo-key' | 'echo-stream'>, string> = {
   ok: 'Clean stream', nousage: 'No usage chunk', rate: 'Rate limited', unauthorized: 'Bad key', 'server-error': 'Server error',
   'midstream-error': 'Error mid stream', malformed: 'Malformed chunk', stall: 'Stalled stream', 'stall-headers': 'Never answers',
   'cut-reset': 'Connection reset', 'cut-eof': 'Ends early', 'done-only': 'Empty stream', html: 'HTML page', json: 'Not streamed',
