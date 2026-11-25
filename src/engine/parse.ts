@@ -1,4 +1,5 @@
 // Prompt-suite import (CSV, JSONL, JSON), result import/export, and share links.
+import { cleanRun, hideKeys } from './redact.ts'
 import { approxTokens } from './sse.ts'
 import type { Endpoint, Prompt, RequestResult, Run } from './types.ts'
 
@@ -168,7 +169,7 @@ export function importRun(text: string, makeId: () => string = () => crypto.rand
     results.push({
       endpointId: r.endpointId, promptId: r.promptId, rep: num(r.rep) ?? 0, startedAt: num(r.startedAt) ?? 0, ok,
       ...(num(r.status) !== undefined ? { status: num(r.status) } : {}),
-      ...(!ok ? { errorKind: (ERROR_KINDS.has(r.errorKind as string) ? r.errorKind : num(r.status) === 429 ? 'rate_limit' : 'http') as RequestResult['errorKind'], error: typeof r.error === 'string' ? r.error.slice(0, 400) : 'Failed' } : {}),
+      ...(!ok ? { errorKind: (ERROR_KINDS.has(r.errorKind as string) ? r.errorKind : num(r.status) === 429 ? 'rate_limit' : 'http') as RequestResult['errorKind'], error: typeof r.error === 'string' ? hideKeys(r.error, [], true).slice(0, 400) : 'Failed' } : {}),
       ...(ttftMs !== undefined ? { ttftMs } : {}), ...(totalMs !== undefined ? { totalMs } : {}),
       ...(num(r.outputTokens) !== undefined ? { outputTokens: num(r.outputTokens) } : {}),
       ...(num(r.inputTokens) !== undefined ? { inputTokens: num(r.inputTokens) } : {}),
@@ -189,7 +190,7 @@ export function importRun(text: string, makeId: () => string = () => crypto.rand
 }
 
 export function exportRunJson(run: Run): string {
-  return JSON.stringify({ format: RUN_FORMAT, version: 1, ...run }, null, 1)
+  return JSON.stringify({ format: RUN_FORMAT, version: 1, ...cleanRun(run) }, null, 1)
 }
 
 const csvCell = (v: unknown) => {
@@ -201,7 +202,7 @@ export function resultsCsv(run: Run, tps: (r: RequestResult) => number | null): 
   const head = ['endpoint', 'model', 'base_url', 'prompt', 'suite', 'rep', 'started_ms', 'ok', 'status', 'error_kind', 'error', 'ttft_ms', 'total_ms', 'output_tokens', 'input_tokens', 'token_source', 'decode_tokens_per_s', 'chunks']
   const ep = new Map(run.endpoints.map(e => [e.id, e]))
   const pr = new Map(run.prompts.map(p => [p.id, p]))
-  const lines = run.results.map(r => {
+  const lines = cleanRun(run).results.map(r => {
     const e = ep.get(r.endpointId), p = pr.get(r.promptId), t = tps(r)
     return [e?.name, e?.model, e?.baseUrl, p?.name ?? r.promptId, p?.suite, r.rep, r.startedAt, r.ok, r.status, r.errorKind, r.error, r.ttftMs?.toFixed(1), r.totalMs?.toFixed(1), r.outputTokens, r.inputTokens, r.tokenSource, t?.toFixed(1), r.chunks?.length].map(csvCell).join(',')
   })
