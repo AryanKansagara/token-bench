@@ -103,7 +103,7 @@ export default function Docs() {
           <dt>Jitter</dt><dd>Median absolute change between consecutive inter-token gaps. Zero for a perfectly steady stream; robust to a single stall.</dd>
           <dt>Consistency</dt><dd>Coefficient of variation (standard deviation ÷ mean) of decode speed across requests.</dd>
           <dt>Percentiles and intervals</dt><dd>Linear interpolation (numpy default). Intervals are 95% percentile bootstrap on the median with 1,000 resamples and a fixed seed.</dd>
-          <dt>Error and 429 rate</dt><dd>Failed requests over all completed requests; cancelled requests are excluded. Failed requests are not counted in cost.</dd>
+          <dt>Error and 429 rate</dt><dd>A stream that closes with neither <code>[DONE]</code> nor a finish reason counts as failed, because it was cut off. Failed requests over all completed requests; cancelled requests are excluded. Failed requests are not counted in cost.</dd>
           <dt>Token approximation</dt><dd>When no usage chunk arrives: the average of characters ÷ 4 and words × 0.75, typically within about 10% of BPE tokenizers for English and code.</dd>
           <dt>Agent loop estimate</dt><dd>2,000 Monte Carlo draws of measured (TTFT, decode speed) pairs per call. If the run includes prompts of very different lengths and TTFT rises with input, TTFT is modelled as a line in input tokens plus a resampled residual.</dd>
         </dl>

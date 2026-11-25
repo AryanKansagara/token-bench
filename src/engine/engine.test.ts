@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer, type Server } from 'node:http'
 import { execFile } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { approxTokens, createSseParser, parseChatData, type SseEvent } from './sse.ts'
@@ -400,6 +400,24 @@ test('generated Node script runs the benchmark from a terminal and its output im
     assert.ok(run!.results.every(r => r.ok && r.outputTokens === 3 && r.ttftMs! > 0))
     assert.ok(auth.every(a => a === 'Bearer sk-env'))
   } finally { server.close() }
+})
+
+test('the Node script treats a stream that closes early as a failure', async () => {
+  const server = createServer((req, res) => {
+    req.resume()
+    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    res.end(chunk('one ') + (req.url!.startsWith('/finish') ? 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' : ''))
+  })
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', () => r()))
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  const dir = mkdtempSync(join(tmpdir(), 'tb-'))
+  try {
+    writeFileSync(join(dir, 'tb.mjs'), nodeScript([{ ...EP, id: 'cut', baseUrl: origin + '/cut' }, { ...EP, id: 'fin', baseUrl: origin + '/finish' }], [P], { reps: 1, concurrency: 1, rampMs: 0, timeoutMs: 5000, temperature: 0 }))
+    await new Promise<void>((res, rej) => execFile(process.execPath, [join(dir, 'tb.mjs'), join(dir, 'out.json')], e => e ? rej(e) : res()))
+    const [cut, fin] = JSON.parse(readFileSync(join(dir, 'out.json'), 'utf8')).results
+    assert.equal(cut.ok, false); assert.equal(cut.errorKind, 'stream'); assert.equal(cut.error, 'Stream ended before [DONE], after 1 chunk')
+    assert.equal(fin.ok, true)
+  } finally { server.close(); rmSync(dir, { recursive: true, force: true }) }
 })
 
 test('generated Node script refuses to run without the key environment variables', async () => {

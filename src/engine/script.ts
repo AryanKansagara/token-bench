@@ -18,7 +18,7 @@ async function one(ep, p, rep, startedAt) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), CONFIG.config.timeoutMs)
   const t0 = performance.now(), chunks = []
-  let text = '', reasoning = '', usage, streamError, buf = ''
+  let text = '', reasoning = '', usage, streamError, buf = '', ended = false
   const messages = (p.system ? [{ role: 'system', content: p.system }] : []).concat([{ role: 'user', content: p.user }])
   const body = { model: ep.model, messages, stream: true, max_tokens: p.maxTokens, temperature: CONFIG.config.temperature }
   if (ep.streamOptions) body.stream_options = { include_usage: true }
@@ -31,11 +31,11 @@ async function one(ep, p, rep, startedAt) {
     }
     const dec = new TextDecoder()
     const onData = d => {
-      if (d.trim() === '[DONE]') return
+      if (d.trim() === '[DONE]') { ended = true; return }
       let j; try { j = JSON.parse(d) } catch { streamError = 'Malformed stream chunk'; return }
       if (j.error) { streamError = hide(typeof j.error === 'string' ? j.error : (j.error.message || 'Provider error')); return }
       let c = '', r = ''
-      for (const ch of j.choices || []) { c += (ch.delta && ch.delta.content) || ch.text || ''; r += (ch.delta && (ch.delta.reasoning || ch.delta.reasoning_content)) || '' }
+      for (const ch of j.choices || []) { if (ch.finish_reason) ended = true; c += (ch.delta && ch.delta.content) || ch.text || ''; r += (ch.delta && (ch.delta.reasoning || ch.delta.reasoning_content)) || '' }
       if (c || r) { chunks.push(Math.round((performance.now() - t0) * 10) / 10); text += c; reasoning += r }
       if (j.usage || (j.x_groq && j.x_groq.usage)) usage = j.usage || j.x_groq.usage
     }
@@ -52,6 +52,7 @@ async function one(ep, p, rep, startedAt) {
     const totalMs = performance.now() - t0
     if (streamError) return Object.assign(base, { status: res.status, errorKind: 'stream', error: streamError, totalMs })
     if (!chunks.length) return Object.assign(base, { status: res.status, errorKind: 'stream', error: 'Stream ended without content', totalMs })
+    if (!ended) return Object.assign(base, { status: res.status, errorKind: 'stream', error: 'Stream ended before [DONE], after ' + chunks.length + ' chunk' + (chunks.length === 1 ? '' : 's'), totalMs, chunks })
     const exact = usage && usage.completion_tokens
     return Object.assign(base, { ok: true, status: res.status, ttftMs: chunks[0], totalMs, outputTokens: exact != null ? Number(exact) : approx(reasoning + text), inputTokens: Number(usage && usage.prompt_tokens) || approx((p.system || '') + p.user), tokenSource: exact != null ? 'usage' : 'approx', chunks, text: hide(text).slice(0, 2000) })
   } catch (e) {

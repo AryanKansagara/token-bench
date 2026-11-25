@@ -10,13 +10,12 @@ const NAMES: Record<Exclude<Scenario, 'echo-key' | 'echo-stream'>, string> = {
 }
 
 type Named = keyof typeof NAMES
-const MATRIX = (Object.keys(NAMES) as Named[]).filter(s => s !== 'cut-eof')
+const MATRIX = Object.keys(NAMES) as Named[]
 
 test.describe('streaming classification against an in-process stub', () => {
   test('records TTFT, tokens and classification for each way a provider can answer', async ({ page, stub }) => {
     test.setTimeout(180_000)
     await createBenchmark(page, 'Stub classification')
-    // `cut-eof` has its own test below: it is a known bug, and would be ranked here.
     for (const [scenario, name] of MATRIX.map(s => [s, NAMES[s]] as const)) {
       await addEndpoint(page, { name, baseUrl: stub.baseUrl(scenario), key: scenario === 'ok' ? FAKE_KEY : undefined })
     }
@@ -56,6 +55,8 @@ test.describe('streaming classification against an in-process stub', () => {
     }
 
     expect(one('cut-reset')).toMatchObject({ ok: false, errorKind: 'network' })
+    expect(one('cut-eof')).toMatchObject({ ok: false, status: 200, errorKind: 'stream', error: 'Stream ended before [DONE], after 3 chunks' })
+    expect(one('cut-eof').ttftMs).toBeUndefined()
     expect(one('done-only')).toMatchObject({ ok: false, errorKind: 'stream', error: 'Stream finished without any content' })
     expect(one('html')).toMatchObject({ ok: false, errorKind: 'stream', error: 'Stream ended without content or [DONE]' })
     expect(one('json')).toMatchObject({ ok: false, errorKind: 'stream', error: 'Stream ended without content or [DONE]' })
@@ -75,7 +76,7 @@ test.describe('streaming classification against an in-process stub', () => {
     // Two endpoints succeeded and are ranked; every other row has no rank and no timings.
     const ranked = await rows.evaluateAll(trs => trs.map(tr => tr.querySelector('td')!.textContent))
     expect(ranked.filter(r => r !== '–').sort()).toEqual(['1', '2'])
-    for (const name of ['Rate limited', 'Bad key', 'Server error', 'Stalled stream', 'Never answers', 'Connection reset', 'Empty stream', 'HTML page', 'Not streamed']) {
+    for (const name of ['Rate limited', 'Bad key', 'Server error', 'Stalled stream', 'Never answers', 'Connection reset', 'Ends early', 'Empty stream', 'HTML page', 'Not streamed']) {
       const cells = rowOf(name).locator('td')
       await expect(cells.nth(0), name).toHaveText('–')
       await expect(cells.nth(2), name).toHaveText('n/a')
@@ -98,9 +99,10 @@ test.describe('streaming classification against an in-process stub', () => {
 
   // https://github.com/AryanKansagara/token-bench/issues/2
   test('a stream that ends early without [DONE] is a failure, not a result', async ({ page, stub }) => {
-    test.fail(true, 'Known bug: a stream cut off cleanly after some content is recorded as a successful, fast request (https://github.com/AryanKansagara/token-bench/issues/2)')
     await createBenchmark(page, 'Cut off')
-    await addEndpoint(page, { name: NAMES['cut-eof'], baseUrl: stub.baseUrl('cut-eof') })
+    const card = await addEndpoint(page, { name: NAMES['cut-eof'], baseUrl: stub.baseUrl('cut-eof') })
+    await card.getByRole('button', { name: 'Test connection' }).click()
+    await expect(card.getByRole('alert')).toContainText('Stream ended before [DONE]')
     await runBenchmark(page, { timeoutMs: 1500 })
     const { byName } = await latestRunResults(page)
     expect(byName.get(NAMES['cut-eof'])![0]).toMatchObject({ ok: false })

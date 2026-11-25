@@ -103,3 +103,18 @@ test('hosted presets all default to gpt-oss-120b with prices, and only Cerebras 
   assert.deepEqual(PRESETS.filter(p => p.errorsVisible === false).map(p => p.id), ['cerebras'])
   assert.ok(PRESETS.every(p => !/llama-3\.3-70b/i.test(p.model)), 'retired Llama 3.3 70B ids must not be defaults')
 })
+
+test('a stream that closes early is a failure; a finish reason without [DONE] is enough, usage alone is not', async () => {
+  const content = { choices: [{ index: 0, delta: { content: 'one ' }, finish_reason: null }] }
+  const finish = (r: unknown) => ({ choices: [{ index: 0, delta: {}, finish_reason: r }] })
+  const usage = { choices: [], usage: { prompt_tokens: 1, completion_tokens: 2 } }
+  const go = (...parts: unknown[]) => streamChat(EP, 'k', P, 0, 0, { fetch: fetchOf(sse(...parts)) })
+  for (const parts of [[content], [content, content, usage], [content, finish(null)], [content, finish('')]]) {
+    const r = await go(...parts)
+    assert.equal(r.ok, false); assert.equal(r.errorKind, 'stream'); assert.match(r.error!, /^Stream ended before \[DONE\], after \d chunks?$/); assert.equal(r.ttftMs, undefined)
+  }
+  for (const parts of [[content, '[DONE]'], [content, finish('stop')], [content, finish('length'), usage], [{ choices: [{ text: 'legacy', finish_reason: 'stop' }] }]]) assert.equal((await go(...parts)).ok, true)
+  // The last event has no blank line after it: still the end of the stream.
+  assert.equal((await streamChat(EP, 'k', P, 0, 0, { fetch: fetchOf(sse(content) + 'data: [DONE]') })).ok, true)
+  assert.equal((await go('[DONE]')).error, 'Stream finished without any content')
+})
